@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.j
 import { Badge } from '@/components/ui/badge.jsx'
 import { Alert, AlertDescription } from '@/components/ui/alert.jsx'
 import VisualizationDashboard from './components/VisualizationDashboard.jsx'
+import DatasetManagement from './components/DatasetManagement.jsx'; //
 import { 
   Activity, 
   BarChart3, 
@@ -419,7 +420,9 @@ function Dashboard({ user, onLogout }) {
             <VisualizationDashboard />
           </div>
         )}
-
+        {activeTab === 'datasets' && (
+          <DatasetManagement />
+          )}
         {activeTab === 'datasets' && (
           <div className="p-6">
             <Card>

@@ -1,0 +1,10 @@
+What to do now:
+Stop your backend server (if it's running).
+Replace the code in your local backend/src/main.py and backend/src/routes/datasets.py files with the new code provided above.
+Restart your backend server (python src/main.py from within the backend directory).
+Try uploading the mock data file from the Canvas again.
+With these changes, the upload should now succeed, and you will see the new dataset appear in the table.
+
+-----------------------
+
+i should change the CORS in backend 
