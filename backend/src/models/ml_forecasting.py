@@ -262,12 +262,20 @@ class TimeSeriesForecaster:
         tscv = TimeSeriesSplit(n_splits=cv_folds)
         
         # Calculate cross-validation scores
-        cv_scores = cross_val_score(self.model, X, y, cv=tscv, scoring='neg_mean_squared_error')
-        
+        cv_scores = cross_val_score(
+            self.model,
+            X,
+            y,
+            cv=tscv,
+            scoring='neg_mean_squared_error'
+        )
+
+        rmse_scores = np.sqrt(-cv_scores)
+
         return {
-            'cv_rmse_mean': np.sqrt(-cv_scores.mean()),
-            'cv_rmse_std': np.sqrt(cv_scores.std()),
-            'cv_scores': cv_scores.tolist()
+            'cv_rmse_mean': rmse_scores.mean(),
+            'cv_rmse_std': rmse_scores.std(),
+            'cv_scores': cv_scores.tolist(),
         }
 
 
