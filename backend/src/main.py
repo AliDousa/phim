@@ -7,8 +7,12 @@ import os
 import sys
 from pathlib import Path
 
-# Add the src directory to Python path for imports
+# Add the src and project root directories to Python path for imports
 current_dir = Path(__file__).parent
+project_root = current_dir.parent
+
+# Allow imports using either "src." or module names directly
+sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(current_dir))
 
 from flask import Flask, jsonify
