@@ -4,7 +4,12 @@ Test script for epidemiological and ML models.
 
 import sys
 import os
-sys.path.append('/home/ubuntu/public-health-intelligence-platform/backend')
+
+# Add backend directory to sys.path using a relative path so tests can run
+# regardless of where the repository is checked out.
+repo_root = os.path.dirname(os.path.abspath(__file__))
+backend_path = os.path.join(repo_root, 'backend')
+sys.path.insert(0, backend_path)
 
 import numpy as np
 import pandas as pd
