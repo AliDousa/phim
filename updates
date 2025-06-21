@@ -8,3 +8,16 @@ With these changes, the upload should now succeed, and you will see the new data
 -----------------------
 
 i should change the CORS in backend 
+
+________________________________________________________
+21.6.2025
+
+1. Create a new SimulationManager.jsx component: This will be the main page for users to create new simulations and view the status of existing ones.
+
+2. Enhance the VisualizationDashboard.jsx component: This will be updated to fetch and display the results of a selected simulation.
+
+3. Update the main App.jsx: I will integrate the new components and add navigation to create a seamless user experience.
+
+
+1. New File: frontend/src/components/SimulationManager.jsx
+This file provides the UI for creating, viewing, and managing simulations. It dynamically displays parameter fields based on the selected model type.
