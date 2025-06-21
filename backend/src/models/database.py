@@ -90,7 +90,9 @@ class Dataset(db.Model):
             'metadata': self.get_metadata(),
             'is_validated': self.is_validated,
             'validation_errors': self.validation_errors,
-            'user_id': self.user_id
+            'user_id': self.user_id,
+            # Improvement: Add the record count directly to the model's dictionary representation.
+            'record_count': len(self.data_points)
         }
 
 
@@ -356,4 +358,3 @@ class AuditLog(db.Model):
             'ip_address': self.ip_address,
             'user_agent': self.user_agent
         }
-

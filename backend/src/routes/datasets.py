@@ -10,9 +10,43 @@ import json
 from datetime import datetime
 import os
 import uuid
+from werkzeug.utils import secure_filename
 
 datasets_bp = Blueprint('datasets', __name__)
 
+# --- Helper function to parse and insert data points ---
+def parse_and_insert_data(df, dataset_id):
+    """Parses a DataFrame and inserts data points into the database."""
+    data_points = []
+    # Normalize column names to lowercase and replace spaces with underscores
+    df.columns = [col.lower().replace(' ', '_') for col in df.columns]
+
+    # Required columns for a valid timeseries dataset
+    required_cols = ['date', 'region', 'cases', 'deaths']
+    if not all(col in df.columns for col in required_cols):
+        raise ValueError(f"CSV/JSON must contain the following columns: {', '.join(required_cols)}")
+
+    for _, row in df.iterrows():
+        # Convert date to datetime object
+        try:
+            timestamp = pd.to_datetime(row['date'])
+        except Exception:
+            # Skip rows with unparseable dates
+            continue
+
+        data_point = DataPoint(
+            dataset_id=dataset_id,
+            timestamp=timestamp,
+            location=row.get('region'),
+            new_cases=row.get('cases'),
+            new_deaths=row.get('deaths'),
+            # You can map other columns here if they exist in the file
+            # e.g., population=row.get('population')
+        )
+        data_points.append(data_point)
+
+    db.session.bulk_save_objects(data_points)
+    return len(data_points)
 
 @datasets_bp.route('/', methods=['GET'])
 @token_required
@@ -55,43 +89,67 @@ def get_dataset(dataset_id):
     except Exception as e:
         return jsonify({'error': f'Failed to retrieve dataset: {str(e)}'}), 500
 
-
+# --- IMPROVED AND FIXED create_dataset ROUTE ---
 @datasets_bp.route('/', methods=['POST'])
 @token_required
 def create_dataset():
-    """Create a new dataset."""
+    """
+    Create a new dataset from an uploaded file (CSV or JSON).
+    This now handles multipart/form-data.
+    """
     try:
         user = request.current_user
-        data = request.get_json()
-        
-        # Validate required fields
+        form_data = request.form
+
+        # --- 1. Validate form fields ---
         required_fields = ['name', 'data_type']
         for field in required_fields:
-            if field not in data or not data[field]:
+            if field not in form_data or not form_data[field]:
                 return jsonify({'error': f'{field} is required'}), 400
-        
-        # Validate data_type
+
         valid_data_types = ['time_series', 'cross_sectional', 'spatial']
-        if data['data_type'] not in valid_data_types:
+        if form_data['data_type'] not in valid_data_types:
             return jsonify({'error': f'data_type must be one of: {valid_data_types}'}), 400
+
+        # --- 2. Validate file upload ---
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file part in the request'}), 400
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected for uploading'}), 400
         
-        # Create dataset
+        if not file or not (file.filename.endswith('.csv') or file.filename.endswith('.json')):
+            return jsonify({'error': 'Invalid file type. Only CSV and JSON are supported.'}), 400
+
+        # --- 3. Create the Dataset record ---
         dataset = Dataset(
-            name=data['name'],
-            description=data.get('description', ''),
-            data_type=data['data_type'],
-            source=data.get('source', ''),
+            name=form_data['name'],
+            description=form_data.get('description', ''),
+            data_type=form_data['data_type'],
+            source=file.filename,
             user_id=user.id
         )
-        
-        # Set metadata if provided
-        if 'metadata' in data:
-            dataset.set_metadata(data['metadata'])
-        
         db.session.add(dataset)
+        db.session.flush()  # Use flush to get the dataset.id before committing
+
+        # --- 4. Parse file and insert data points ---
+        filename = secure_filename(file.filename)
+        
+        try:
+            if filename.endswith('.csv'):
+                df = pd.read_csv(file.stream)
+            else: # .json
+                df = pd.read_json(file.stream)
+            
+            points_added = parse_and_insert_data(df, dataset.id)
+        
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f"Failed to parse or process file: {str(e)}"}), 400
+
+        # --- 5. Commit transaction and log audit ---
         db.session.commit()
         
-        # Log dataset creation
         audit_log = AuditLog(
             user_id=user.id,
             action='dataset_created',
@@ -100,7 +158,12 @@ def create_dataset():
             ip_address=request.remote_addr,
             user_agent=request.headers.get('User-Agent')
         )
-        audit_log.set_details({'dataset_name': dataset.name, 'data_type': dataset.data_type})
+        audit_log.set_details({
+            'dataset_name': dataset.name,
+            'data_type': dataset.data_type,
+            'filename': filename,
+            'points_added': points_added
+        })
         db.session.add(audit_log)
         db.session.commit()
         
@@ -111,7 +174,7 @@ def create_dataset():
         
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to create dataset: {str(e)}'}), 500
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 
 @datasets_bp.route('/<int:dataset_id>', methods=['PUT'])
@@ -247,9 +310,9 @@ def get_dataset_data(dataset_id):
             query = query.filter(DataPoint.location.ilike(f'%{location}%'))
         
         # Apply pagination
-        data_points = query.order_by(DataPoint.timestamp.desc()).offset(offset).limit(limit).all()
         total_count = query.count()
-        
+        data_points = query.order_by(DataPoint.timestamp.asc()).offset(offset).limit(limit).all()
+
         return jsonify({
             'data_points': [dp.to_dict() for dp in data_points],
             'total_count': total_count,
@@ -509,4 +572,3 @@ def export_dataset(dataset_id):
         
     except Exception as e:
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
-

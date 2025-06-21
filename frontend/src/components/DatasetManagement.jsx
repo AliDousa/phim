@@ -61,6 +61,8 @@ export default function DatasetManagement() {
     }
 
     try {
+      // NOTE: No 'Content-Type' header is set here. The browser automatically
+      // sets it to 'multipart/form-data' and includes the boundary.
       const response = await fetch('/api/datasets', {
         method: 'POST',
         headers: {
@@ -74,15 +76,12 @@ export default function DatasetManagement() {
         try {
           const contentType = response.headers.get("content-type");
           if (contentType && contentType.indexOf("application/json") !== -1) {
-            // It's a JSON error, parse it
             const errData = await response.json();
             errorMessage = errData.error?.message || JSON.stringify(errData);
           } else {
-            // It's not JSON, probably HTML or plain text
             errorMessage = await response.text();
           }
         } catch (e) {
-            // This catch is in case parsing fails for some reason
             errorMessage = `Failed to parse server error response. Status: ${response.status}`;
         }
         throw new Error(errorMessage);
@@ -175,6 +174,7 @@ export default function DatasetManagement() {
           <TableRow key={dataset.id}>
             <TableCell className="font-medium">{dataset.name}</TableCell>
             <TableCell><Badge variant="outline">{dataset.data_type}</Badge></TableCell>
+            {/* This now correctly reads `record_count` from the API response */}
             <TableCell>{dataset.record_count}</TableCell>
             <TableCell>{new Date(dataset.upload_date).toLocaleString()}</TableCell>
             <TableCell>
@@ -213,6 +213,7 @@ export default function DatasetManagement() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="data_type">Data Type</Label>
+                 {/* The name attribute on Select and other form elements is crucial for FormData */}
                 <Select name="data_type" required>
                   <SelectTrigger id="data_type">
                     <SelectValue placeholder="Select data type" />
