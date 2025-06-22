@@ -1,0 +1,324 @@
+# Prometheus Alert Rules for PHIP Backend
+
+groups:
+  # Application Health Alerts
+  - name: phip_application_health
+    rules:
+      - alert: PHIPBackendDown
+        expr: up{job="phip-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: phip-backend
+          team: backend
+        annotations:
+          summary: "PHIP Backend service is down"
+          description: "PHIP Backend service has been down for more than 1 minute"
+          runbook_url: "https://docs.company.com/runbooks/phip-backend-down"
+
+      - alert: PHIPHealthCheckFailing
+        expr: probe_success{job="blackbox", instance=~".*health.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: phip-backend
+          team: backend
+        annotations:
+          summary: "PHIP health check failing"
+          description: "Health check endpoint {{ $labels.instance }} has been failing for 2 minutes"
+
+      - alert: PHIPHighResponseTime
+        expr: histogram_quantile(0.95, rate(flask_http_request_duration_seconds_bucket{job="phip-backend"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: phip-backend
+          team: backend
+        annotations:
+          summary: "PHIP Backend high response time"
+          description: "95th percentile response time is {{ $value }}s for 5 minutes"
+
+      - alert: PHIPHighErrorRate
+        expr: rate(flask_http_request_exceptions_total{job="phip-backend"}[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          service: phip-backend
+          team: backend
+        annotations:
+          summary: "PHIP Backend high error rate"
+          description: "Error rate is {{ $value | humanizePercentage }} for 3 minutes"
+
+  # Database Alerts
+  - name: phip_database_health
+    rules:
+      - alert: PostgreSQLDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: postgresql
+          team: backend
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database has been down for more than 1 minute"
+
+      - alert: PostgreSQLHighConnections
+        expr: pg_stat_database_numbackends / pg_settings_max_connections * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: postgresql
+          team: backend
+        annotations:
+          summary: "PostgreSQL high connection usage"
+          description: "PostgreSQL connection usage is {{ $value | humanizePercentage }}"
+
+      - alert: PostgreSQLSlowQueries
+        expr: rate(pg_stat_database_tup_returned[5m]) / rate(pg_stat_database_tup_fetched[5m]) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: postgresql
+          team: backend
+        annotations:
+          summary: "PostgreSQL slow queries detected"
+          description: "Query efficiency is {{ $value | humanizePercentage }}"
+
+      - alert: PostgreSQLHighDiskUsage
+        expr: (pg_database_size_bytes / 1024 / 1024 / 1024) > 50
+        for: 1m
+        labels:
+          severity: warning
+          service: postgresql
+          team: backend
+        annotations:
+          summary: "PostgreSQL database size is large"
+          description: "Database size is {{ $value }}GB"
+
+  # Redis Alerts
+  - name: phip_redis_health
+    rules:
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+          team: backend
+        annotations:
+          summary: "Redis is down"
+          description: "Redis server has been down for more than 1 minute"
+
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_config_maxmemory * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+          team: backend
+        annotations:
+          summary: "Redis high memory usage"
+          description: "Redis memory usage is {{ $value | humanizePercentage }}"
+
+      - alert: RedisHighConnections
+        expr: redis_connected_clients > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+          team: backend
+        annotations:
+          summary: "Redis high number of connections"
+          description: "Redis has {{ $value }} connected clients"
+
+  # Celery Task Queue Alerts
+  - name: phip_celery_health
+    rules:
+      - alert: CeleryWorkersDown
+        expr: up{job="celery-workers"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: celery
+          team: backend
+        annotations:
+          summary: "Celery workers are down"
+          description: "All Celery workers have been down for more than 2 minutes"
+
+      - alert: CeleryHighTaskLatency
+        expr: histogram_quantile(0.95, rate(celery_task_duration_seconds_bucket[5m])) > 300
+        for: 10m
+        labels:
+          severity: warning
+          service: celery
+          team: backend
+        annotations:
+          summary: "Celery high task latency"
+          description: "95th percentile task duration is {{ $value }}s"
+
+      - alert: CeleryHighFailureRate
+        expr: rate(celery_tasks_total{status="failure"}[5m]) / rate(celery_tasks_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: celery
+          team: backend
+        annotations:
+          summary: "Celery high task failure rate"
+          description: "Task failure rate is {{ $value | humanizePercentage }}"
+
+      - alert: CeleryQueueBacklog
+        expr: celery_queue_length > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: celery
+          team: backend
+        annotations:
+          summary: "Celery queue backlog"
+          description: "Queue has {{ $value }} pending tasks"
+
+  # System Resource Alerts
+  - name: phip_system_resources
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+          team: infrastructure
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value | humanizePercentage }} for 10 minutes"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+          team: infrastructure
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanizePercentage }}"
+
+      - alert: HighDiskUsage
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+          team: infrastructure
+        annotations:
+          summary: "High disk usage"
+          description: "Disk usage on {{ $labels.mountpoint }} is {{ $value | humanizePercentage }}"
+
+      - alert: DiskSpaceCritical
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 95
+        for: 1m
+        labels:
+          severity: critical
+          service: system
+          team: infrastructure
+        annotations:
+          summary: "Critical disk space"
+          description: "Disk space on {{ $labels.mountpoint }} is {{ $value | humanizePercentage }}"
+
+  # Security Alerts
+  - name: phip_security
+    rules:
+      - alert: HighFailedLoginRate
+        expr: rate(failed_logins_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          service: phip-backend
+          team: security
+        annotations:
+          summary: "High failed login rate"
+          description: "Failed login rate is {{ $value }} per second"
+
+      - alert: SecurityEventSpike
+        expr: rate(security_events_total[5m]) > 50
+        for: 1m
+        labels:
+          severity: warning
+          service: phip-backend
+          team: security
+        annotations:
+          summary: "Security event spike"
+          description: "Security events rate is {{ $value }} per second"
+
+      - alert: RateLimitExceeded
+        expr: rate(rate_limit_exceeded_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: info
+          service: phip-backend
+          team: backend
+        annotations:
+          summary: "Rate limit frequently exceeded"
+          description: "Rate limit exceeded {{ $value }} times per second"
+
+  # Business Logic Alerts
+  - name: phip_business_metrics
+    rules:
+      - alert: SimulationFailureSpike
+        expr: rate(simulations_total{status="failed"}[10m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: phip-backend
+          team: backend
+        annotations:
+          summary: "High simulation failure rate"
+          description: "Simulation failure rate is {{ $value }} per second"
+
+      - alert: DatasetProcessingStalled
+        expr: increase(datasets_created_total[1h]) == 0 and hour() >= 9 and hour() <= 17
+        for: 30m
+        labels:
+          severity: info
+          service: phip-backend
+          team: backend
+        annotations:
+          summary: "No datasets processed recently"
+          description: "No new datasets have been processed in the last hour during business hours"
+
+      - alert: LowActiveUsers
+        expr: active_users < 5 and hour() >= 9 and hour() <= 17
+        for: 30m
+        labels:
+          severity: info
+          service: phip-backend
+          team: product
+        annotations:
+          summary: "Low active user count"
+          description: "Only {{ $value }} active users in the last 24 hours during business hours"
+
+  # SSL Certificate Alerts
+  - name: ssl_certificates
+    rules:
+      - alert: SSLCertificateExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 86400 * 7
+        for: 1h
+        labels:
+          severity: warning
+          service: ssl
+          team: infrastructure
+        annotations:
+          summary: "SSL certificate expiring soon"
+          description: "SSL certificate for {{ $labels.instance }} expires in {{ $value | humanizeDuration }}"
+
+      - alert: SSLCertificateExpired
+        expr: probe_ssl_earliest_cert_expiry - time() <= 0
+        for: 1m
+        labels:
+          severity: critical
+          service: ssl
+          team: infrastructure
+        annotations:
+          summary: "SSL certificate expired"
+          description: "SSL certificate for {{ $labels.instance }} has expired"
