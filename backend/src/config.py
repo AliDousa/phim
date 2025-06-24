@@ -56,7 +56,7 @@ class Config:
 
     # File upload settings
     MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "104857600"))  # 100MB
-    UPLOAD_FOLDER = DATA_DIR / "uploads"
+    UPLOAD_FOLDER = BASE_DIR / "uploads"
     UPLOAD_FOLDER.mkdir(exist_ok=True)
 
     # Security settings

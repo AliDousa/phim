@@ -1,29 +1,13 @@
 """
-Production-ready Flask application entry point.
-Public Health Intelligence Platform with full production features.
+Minimal Flask application entry point for development.
+Public Health Intelligence Platform - simplified version.
 """
 
 import os
 import sys
 import logging
-from pathlib import Path
-from flask import Flask, jsonify, request, g
+from flask import Flask, jsonify
 from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from flask_caching import Cache
-from prometheus_flask_exporter import PrometheusMetrics
-import structlog
-import sentry_sdk
-from sentry_sdk.integrations.flask import FlaskIntegration
-from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
-from sentry_sdk.integrations.celery import CeleryIntegration
-from sqlalchemy import text
-import redis
-import time
-
-# Import configuration
-from .config import get_config
 
 # Import database and models
 from .models.database import db
@@ -34,11 +18,6 @@ from .routes.simulations import simulations_bp
 # Import tasks
 from .tasks import make_celery
 
-# Import security utilities
-from .security import SecurityManager
-from .monitoring import setup_monitoring
-from .utils import setup_logging
-
 
 def create_app(config_name=None):
     """Application factory for creating Flask app instances."""
@@ -46,28 +25,25 @@ def create_app(config_name=None):
     # Create Flask app
     app = Flask(__name__)
 
-    # Load configuration
-    if config_name is None:
-        config_name = os.environ.get("FLASK_ENV", "development")
+    # Basic configuration
+    app.config["SECRET_KEY"] = os.environ.get(
+        "SECRET_KEY", "dev-secret-key-for-testing"
+    )
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
+        "DATABASE_URL", "sqlite:///app.db"
+    )
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-    config_class = get_config()
-    app.config.from_object(config_class)
+    # CORS origins
+    cors_origins = os.environ.get(
+        "CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
+    )
+    app.config["CORS_ORIGINS"] = cors_origins.split(",")
 
-    # Setup logging
-    setup_logging(app)
-
-    # Setup Sentry for error tracking
-    if app.config.get("SENTRY_DSN"):
-        sentry_sdk.init(
-            dsn=app.config["SENTRY_DSN"],
-            integrations=[
-                FlaskIntegration(),
-                SqlalchemyIntegration(),
-                CeleryIntegration(),
-            ],
-            traces_sample_rate=0.1,
-            environment=config_name,
-        )
+    # Setup basic logging
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
 
     # Initialize extensions
     initialize_extensions(app)
@@ -77,13 +53,6 @@ def create_app(config_name=None):
 
     # Register error handlers
     register_error_handlers(app)
-
-    # Setup security
-    setup_security(app)
-
-    # Setup monitoring
-    if app.config.get("PROMETHEUS_METRICS"):
-        setup_monitoring(app)
 
     # Setup health checks
     setup_health_checks(app)
@@ -100,42 +69,20 @@ def initialize_extensions(app):
     # CORS
     CORS(
         app,
-        origins=app.config["CORS_ORIGINS"],
+        origins=app.config.get(
+            "CORS_ORIGINS", ["http://localhost:3000", "http://localhost:5173"]
+        ),
         supports_credentials=True,
-        expose_headers=["X-Total-Count", "X-Page-Count"],
     )
-
-    # Rate limiting
-    app.limiter = Limiter(
-        app,
-        key_func=get_remote_address,
-        default_limits=[app.config["RATELIMIT_DEFAULT"]],
-        storage_uri=app.config["RATELIMIT_STORAGE_URL"],
-        headers_enabled=app.config.get("RATELIMIT_HEADERS_ENABLED", True),
-    )
-
-    # Caching
-    app.cache = Cache(app)
 
     # Celery
     app.celery = make_celery(app)
-
-    # Redis connection
-    app.redis = redis.from_url(app.config["REDIS_URL"])
 
 
 def register_blueprints(app):
     """Register application blueprints."""
 
-    # API version prefix
-    api_prefix = f"/api/{app.config.get('API_VERSION', 'v1')}"
-
-    # Register blueprints with versioning
-    app.register_blueprint(auth_bp, url_prefix=f"{api_prefix}/auth")
-    app.register_blueprint(datasets_bp, url_prefix=f"{api_prefix}/datasets")
-    app.register_blueprint(simulations_bp, url_prefix=f"{api_prefix}/simulations")
-
-    # Legacy support (remove in future versions)
+    # Register blueprints
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(datasets_bp, url_prefix="/api/datasets")
     app.register_blueprint(simulations_bp, url_prefix="/api/simulations")
@@ -146,12 +93,11 @@ def register_error_handlers(app):
 
     @app.errorhandler(400)
     def bad_request(error):
-        """Handle 400 errors."""
         return (
             jsonify(
                 {
                     "error": "Bad request",
-                    "message": "The request could not be understood by the server",
+                    "message": "The request could not be understood",
                     "status_code": 400,
                 }
             ),
@@ -160,7 +106,6 @@ def register_error_handlers(app):
 
     @app.errorhandler(401)
     def unauthorized(error):
-        """Handle 401 errors."""
         return (
             jsonify(
                 {
@@ -174,7 +119,6 @@ def register_error_handlers(app):
 
     @app.errorhandler(403)
     def forbidden(error):
-        """Handle 403 errors."""
         return (
             jsonify(
                 {
@@ -188,7 +132,6 @@ def register_error_handlers(app):
 
     @app.errorhandler(404)
     def not_found(error):
-        """Handle 404 errors."""
         return (
             jsonify(
                 {
@@ -200,57 +143,10 @@ def register_error_handlers(app):
             404,
         )
 
-    @app.errorhandler(413)
-    def request_entity_too_large(error):
-        """Handle 413 errors."""
-        return (
-            jsonify(
-                {
-                    "error": "File too large",
-                    "message": f"File size exceeds maximum allowed size",
-                    "status_code": 413,
-                }
-            ),
-            413,
-        )
-
-    @app.errorhandler(422)
-    def unprocessable_entity(error):
-        """Handle 422 errors."""
-        return (
-            jsonify(
-                {
-                    "error": "Unprocessable entity",
-                    "message": "The request was well-formed but was unable to be processed",
-                    "status_code": 422,
-                }
-            ),
-            422,
-        )
-
-    @app.errorhandler(429)
-    def rate_limit_exceeded(error):
-        """Handle 429 errors."""
-        return (
-            jsonify(
-                {
-                    "error": "Rate limit exceeded",
-                    "message": "Too many requests. Please try again later",
-                    "status_code": 429,
-                    "retry_after": error.retry_after,
-                }
-            ),
-            429,
-        )
-
     @app.errorhandler(500)
     def internal_error(error):
-        """Handle 500 errors."""
         db.session.rollback()
-
-        # Log the error
-        app.logger.error(f"Internal server error: {error}", exc_info=True)
-
+        app.logger.error(f"Internal server error: {error}")
         return (
             jsonify(
                 {
@@ -262,71 +158,6 @@ def register_error_handlers(app):
             500,
         )
 
-    @app.errorhandler(502)
-    def bad_gateway(error):
-        """Handle 502 errors."""
-        return (
-            jsonify(
-                {
-                    "error": "Bad gateway",
-                    "message": "The server received an invalid response",
-                    "status_code": 502,
-                }
-            ),
-            502,
-        )
-
-    @app.errorhandler(503)
-    def service_unavailable(error):
-        """Handle 503 errors."""
-        return (
-            jsonify(
-                {
-                    "error": "Service unavailable",
-                    "message": "The service is temporarily unavailable",
-                    "status_code": 503,
-                }
-            ),
-            503,
-        )
-
-
-def setup_security(app):
-    """Setup security features."""
-
-    security_manager = SecurityManager(app)
-
-    @app.before_request
-    def before_request():
-        """Security checks before each request."""
-
-        # Request timing
-        g.start_time = time.time()
-
-        # Security headers
-        security_manager.apply_security_headers()
-
-        # Rate limiting bypass for health checks
-        if request.endpoint in ["health_check", "health_detail", "metrics"]:
-            return
-
-        # Request validation
-        security_manager.validate_request()
-
-    @app.after_request
-    def after_request(response):
-        """Security processing after each request."""
-
-        # Calculate request duration
-        if hasattr(g, "start_time"):
-            duration = time.time() - g.start_time
-            response.headers["X-Response-Time"] = f"{duration:.3f}s"
-
-        # Apply security headers
-        security_manager.apply_response_headers(response)
-
-        return response
-
 
 def setup_health_checks(app):
     """Setup health check endpoints."""
@@ -336,24 +167,16 @@ def setup_health_checks(app):
         """Root endpoint - API information."""
         return jsonify(
             {
-                "name": app.config.get(
-                    "API_TITLE", "Public Health Intelligence Platform API"
-                ),
-                "description": app.config.get(
-                    "API_DESCRIPTION",
-                    "API for epidemiological modeling and forecasting",
-                ),
-                "version": app.config.get("API_VERSION", "v1"),
+                "name": "Public Health Intelligence Platform API",
+                "description": "API for epidemiological modeling and forecasting",
+                "version": "v1",
                 "status": "running",
                 "environment": os.environ.get("FLASK_ENV", "development"),
                 "endpoints": {
-                    "auth": f"/api/{app.config.get('API_VERSION', 'v1')}/auth",
-                    "datasets": f"/api/{app.config.get('API_VERSION', 'v1')}/datasets",
-                    "simulations": f"/api/{app.config.get('API_VERSION', 'v1')}/simulations",
+                    "auth": "/api/auth",
+                    "datasets": "/api/datasets",
+                    "simulations": "/api/simulations",
                     "health": "/health",
-                    "metrics": (
-                        "/metrics" if app.config.get("PROMETHEUS_METRICS") else None
-                    ),
                 },
             }
         )
@@ -363,118 +186,28 @@ def setup_health_checks(app):
         """Basic health check endpoint."""
         try:
             # Test database connection
+            from sqlalchemy import text
+
             with db.engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
             db_status = "healthy"
         except Exception as e:
             db_status = f"unhealthy: {str(e)}"
 
-        # Test Redis connection
-        try:
-            app.redis.ping()
-            redis_status = "healthy"
-        except Exception as e:
-            redis_status = f"unhealthy: {str(e)}"
-
-        # Test Celery
-        try:
-            celery_inspect = app.celery.control.inspect()
-            active_workers = celery_inspect.active()
-            celery_status = "healthy" if active_workers else "no_workers"
-        except Exception as e:
-            celery_status = f"unhealthy: {str(e)}"
-
-        overall_status = (
-            "healthy"
-            if all(status == "healthy" for status in [db_status, redis_status])
-            else "degraded"
-        )
+        overall_status = "healthy" if db_status == "healthy" else "degraded"
 
         return jsonify(
-            {
-                "status": overall_status,
-                "timestamp": time.time(),
-                "services": {
-                    "database": db_status,
-                    "redis": redis_status,
-                    "celery": celery_status,
-                },
-            }
+            {"status": overall_status, "services": {"database": db_status}}
         ), (200 if overall_status == "healthy" else 503)
 
-    @app.route("/health/detail")
-    def health_detail():
-        """Detailed health check endpoint."""
-        health_data = {
-            "status": "healthy",
-            "timestamp": time.time(),
-            "environment": os.environ.get("FLASK_ENV", "development"),
-            "version": app.config.get("API_VERSION", "v1"),
-            "uptime": time.time() - app.start_time if hasattr(app, "start_time") else 0,
-            "services": {},
-            "metrics": {},
-        }
-
-        # Database health
-        try:
-            start_time = time.time()
-            with db.engine.connect() as connection:
-                result = connection.execute(text("SELECT COUNT(*) FROM users"))
-                user_count = result.scalar()
-            db_response_time = time.time() - start_time
-
-            health_data["services"]["database"] = {
-                "status": "healthy",
-                "response_time": f"{db_response_time:.3f}s",
-                "user_count": user_count,
-            }
-        except Exception as e:
-            health_data["services"]["database"] = {
-                "status": "unhealthy",
-                "error": str(e),
-            }
-            health_data["status"] = "degraded"
-
-        # Redis health
-        try:
-            start_time = time.time()
-            app.redis.ping()
-            redis_response_time = time.time() - start_time
-            redis_info = app.redis.info()
-
-            health_data["services"]["redis"] = {
-                "status": "healthy",
-                "response_time": f"{redis_response_time:.3f}s",
-                "memory_usage": redis_info.get("used_memory_human"),
-                "connected_clients": redis_info.get("connected_clients"),
-            }
-        except Exception as e:
-            health_data["services"]["redis"] = {"status": "unhealthy", "error": str(e)}
-            health_data["status"] = "degraded"
-
-        # Celery health
-        try:
-            celery_inspect = app.celery.control.inspect()
-            active_workers = celery_inspect.active()
-            registered_tasks = celery_inspect.registered()
-
-            health_data["services"]["celery"] = {
-                "status": "healthy" if active_workers else "no_workers",
-                "active_workers": len(active_workers) if active_workers else 0,
-                "registered_tasks": (
-                    sum(len(tasks) for tasks in registered_tasks.values())
-                    if registered_tasks
-                    else 0
-                ),
-            }
-        except Exception as e:
-            health_data["services"]["celery"] = {"status": "unhealthy", "error": str(e)}
-
-        return jsonify(health_data), 200 if health_data["status"] == "healthy" else 503
+    @app.route("/api/health")
+    def api_health_check():
+        """API health check endpoint."""
+        return health_check()
 
 
 def initialize_database():
-    """Initialize database tables and create indexes."""
+    """Initialize database tables."""
     try:
         # Import all models to ensure they're registered
         from .models.database import (
@@ -490,78 +223,7 @@ def initialize_database():
         # Create all tables
         db.create_all()
 
-        # Create additional indexes for performance
-        with db.engine.connect() as connection:
-            # Data points indexes
-            connection.execute(
-                text(
-                    """
-                CREATE INDEX IF NOT EXISTS idx_data_points_dataset_timestamp 
-                ON data_points(dataset_id, timestamp)
-            """
-                )
-            )
-
-            connection.execute(
-                text(
-                    """
-                CREATE INDEX IF NOT EXISTS idx_data_points_location_timestamp 
-                ON data_points(location, timestamp)
-            """
-                )
-            )
-
-            # Simulations indexes
-            connection.execute(
-                text(
-                    """
-                CREATE INDEX IF NOT EXISTS idx_simulations_user_created 
-                ON simulations(user_id, created_at)
-            """
-                )
-            )
-
-            connection.execute(
-                text(
-                    """
-                CREATE INDEX IF NOT EXISTS idx_simulations_status_created 
-                ON simulations(status, created_at)
-            """
-                )
-            )
-
-            # Forecasts indexes
-            connection.execute(
-                text(
-                    """
-                CREATE INDEX IF NOT EXISTS idx_forecasts_simulation_target 
-                ON forecasts(simulation_id, target_date)
-            """
-                )
-            )
-
-            # Audit logs indexes
-            connection.execute(
-                text(
-                    """
-                CREATE INDEX IF NOT EXISTS idx_audit_logs_user_timestamp 
-                ON audit_logs(user_id, timestamp)
-            """
-                )
-            )
-
-            connection.execute(
-                text(
-                    """
-                CREATE INDEX IF NOT EXISTS idx_audit_logs_action_timestamp 
-                ON audit_logs(action, timestamp)
-            """
-                )
-            )
-
-            connection.commit()
-
-        app.logger.info("✓ Database tables and indexes created successfully")
+        app.logger.info("✓ Database tables created successfully")
         return True
 
     except Exception as e:
@@ -571,9 +233,6 @@ def initialize_database():
 
 # Create application instance
 app = create_app()
-
-# Record start time for uptime calculation
-app.start_time = time.time()
 
 # Initialize database on startup
 with app.app_context():
@@ -585,7 +244,7 @@ with app.app_context():
 if __name__ == "__main__":
     # Development server only
     app.logger.info("=" * 60)
-    app.logger.info("Public Health Intelligence Platform")
+    app.logger.info("Public Health Intelligence Platform - Development")
     app.logger.info("=" * 60)
     app.logger.info("Starting development server...")
 
@@ -596,16 +255,14 @@ if __name__ == "__main__":
             sys.exit(1)
 
     app.logger.info("✓ Application initialized successfully")
-    app.logger.info("")
     app.logger.info("Server Information:")
     app.logger.info(f"  Backend API: http://localhost:5000")
     app.logger.info(f"  Health Check: http://localhost:5000/health")
-    app.logger.info(f"  API Documentation: http://localhost:5000/")
     app.logger.info("")
     app.logger.info("Available endpoints:")
-    app.logger.info("  Authentication: /api/v1/auth/*")
-    app.logger.info("  Datasets: /api/v1/datasets/*")
-    app.logger.info("  Simulations: /api/v1/simulations/*")
+    app.logger.info("  Authentication: /api/auth/*")
+    app.logger.info("  Datasets: /api/datasets/*")
+    app.logger.info("  Simulations: /api/simulations/*")
     app.logger.info("")
     app.logger.info("Press Ctrl+C to stop the server")
     app.logger.info("=" * 60)
@@ -614,7 +271,7 @@ if __name__ == "__main__":
         app.run(
             host="0.0.0.0",
             port=int(os.environ.get("PORT", 5000)),
-            debug=app.config.get("DEBUG", False),
+            debug=True,
             threaded=True,
         )
     except KeyboardInterrupt:

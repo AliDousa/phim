@@ -59,8 +59,14 @@ RUN pip install --upgrade pip setuptools wheel && \
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p data uploads logs instance && \
-    chown -R appuser:appgroup /app && \
+# Create necessary directories
+RUN mkdir -p /app/data /app/uploads /app/logs /app/instance
+
+# Copy application code
+COPY . .
+
+# Set correct ownership for the directories the app needs to write to
+RUN chown -R appuser:appgroup /app/data /app/uploads /app/logs /app/instance \
     chmod +x scripts/*.sh || true
 
 # Remove development files

@@ -1,232 +1,462 @@
 """
-Production-ready configuration settings for the Public Health Intelligence Platform.
+Celery tasks for the Public Health Intelligence Platform.
 """
 
 import os
-from pathlib import Path
-from datetime import timedelta
+import time
+from celery import Celery
+from flask import Flask
 
 
-class Config:
-    """Base configuration class."""
+def make_celery(app: Flask = None) -> Celery:
+    """
+    Create and configure Celery instance for Flask application.
 
-    # Secret key for JWT and sessions
-    SECRET_KEY = os.environ.get("SECRET_KEY")
-    if not SECRET_KEY:
-        raise ValueError("SECRET_KEY environment variable must be set")
+    Args:
+        app: Flask application instance
 
-    # Database configuration
-    BASE_DIR = Path(__file__).resolve().parent.parent
-    DATA_DIR = BASE_DIR / "data"
-    DATA_DIR.mkdir(exist_ok=True)
-
-    # Database URLs
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL", f"sqlite:///{DATA_DIR}/phip.db"
-    )
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_RECORD_QUERIES = True
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        "pool_size": int(os.environ.get("DB_POOL_SIZE", "10")),
-        "pool_recycle": int(os.environ.get("DB_POOL_RECYCLE", "300")),
-        "pool_pre_ping": True,
-        "max_overflow": int(os.environ.get("DB_MAX_OVERFLOW", "20")),
-    }
-
-    # Redis configuration
-    REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-
-    # Celery configuration
-    CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", REDIS_URL)
-    CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", REDIS_URL)
-    CELERY_TASK_SERIALIZER = "json"
-    CELERY_ACCEPT_CONTENT = ["json"]
-    CELERY_RESULT_SERIALIZER = "json"
-    CELERY_TIMEZONE = "UTC"
-    CELERY_ENABLE_UTC = True
-    CELERY_TASK_ROUTES = {
-        "src.tasks.run_simulation_task": {"queue": "simulations"},
-        "src.tasks.process_dataset_task": {"queue": "datasets"},
-    }
-
-    # Caching configuration
-    CACHE_TYPE = "RedisCache"
-    CACHE_REDIS_URL = REDIS_URL
-    CACHE_DEFAULT_TIMEOUT = 300
-
-    # File upload settings
-    MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "104857600"))  # 100MB
-    UPLOAD_FOLDER = DATA_DIR / "uploads"
-    UPLOAD_FOLDER.mkdir(exist_ok=True)
-
-    # Security settings
-    SECURITY_PASSWORD_SALT = os.environ.get(
-        "SECURITY_PASSWORD_SALT", "your-password-salt"
-    )
-    WTF_CSRF_ENABLED = False  # Disabled for API
-    SESSION_COOKIE_SECURE = True
-    SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = "Lax"
-    PERMANENT_SESSION_LIFETIME = timedelta(hours=24)
-
-    # CORS settings
-    CORS_ORIGINS = os.environ.get(
-        "CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
-    ).split(",")
-
-    # JWT settings
-    JWT_EXPIRATION_DELTA = int(os.environ.get("JWT_EXPIRATION_DELTA", "3600"))  # 1 hour
-    JWT_ALGORITHM = "HS256"
-    JWT_REFRESH_EXPIRATION_DELTA = int(
-        os.environ.get("JWT_REFRESH_EXPIRATION_DELTA", "2592000")
-    )  # 30 days
-
-    # Rate limiting configuration
-    RATELIMIT_STORAGE_URL = REDIS_URL
-    RATELIMIT_DEFAULT = "1000 per hour"
-    RATELIMIT_HEADERS_ENABLED = True
-
-    # Pagination settings
-    DATASETS_PER_PAGE = int(os.environ.get("DATASETS_PER_PAGE", "25"))
-    SIMULATIONS_PER_PAGE = int(os.environ.get("SIMULATIONS_PER_PAGE", "25"))
-    DATA_POINTS_PER_PAGE = int(os.environ.get("DATA_POINTS_PER_PAGE", "100"))
-
-    # Logging configuration
-    LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
-    LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
-
-    # Monitoring
-    SENTRY_DSN = os.environ.get("SENTRY_DSN")
-    PROMETHEUS_METRICS = True
-
-    # API Configuration
-    API_VERSION = "v1"
-    API_TITLE = "Public Health Intelligence Platform API"
-    API_DESCRIPTION = "API for epidemiological modeling and forecasting"
-
-    # Task timeouts
-    SIMULATION_TIMEOUT = int(os.environ.get("SIMULATION_TIMEOUT", "3600"))  # 1 hour
-    DATASET_PROCESSING_TIMEOUT = int(
-        os.environ.get("DATASET_PROCESSING_TIMEOUT", "1800")
-    )  # 30 minutes
-
-    # File validation
-    ALLOWED_EXTENSIONS = {"csv", "json", "xlsx"}
-    ALLOWED_MIME_TYPES = {
-        "text/csv": [".csv"],
-        "application/json": [".json"],
-        "text/plain": [".txt"],
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
-    }
-
-
-class DevelopmentConfig(Config):
-    """Development configuration."""
-
-    DEBUG = True
-    TESTING = False
-
-    # Less strict security in development
-    SESSION_COOKIE_SECURE = False
-
-    # Development database
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL", f"sqlite:///{Config.DATA_DIR}/phip_dev.db"
+    Returns:
+        Configured Celery instance
+    """
+    celery = Celery(
+        app.import_name if app else "phip-backend",
+        backend=os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
+        broker=os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
     )
 
-    # Reduced rate limits for development
-    RATELIMIT_DEFAULT = "10000 per hour"
+    # Configure Celery
+    celery.conf.update(
+        task_serializer="json",
+        accept_content=["json"],
+        result_serializer="json",
+        timezone="UTC",
+        enable_utc=True,
+        task_track_started=True,
+        task_time_limit=30 * 60,  # 30 minutes
+        task_soft_time_limit=25 * 60,  # 25 minutes
+        worker_prefetch_multiplier=1,
+        worker_max_tasks_per_child=1000,
+    )
 
-    # Enable SQL query logging in development
-    SQLALCHEMY_ECHO = os.environ.get("SQLALCHEMY_ECHO", "False").lower() == "true"
+    if app:
+        # Update task base class to work with Flask app context
+        class ContextTask(celery.Task):
+            """Make celery tasks work with Flask app context."""
+
+            def __call__(self, *args, **kwargs):
+                with app.app_context():
+                    return self.run(*args, **kwargs)
+
+        celery.Task = ContextTask
+
+        # Store app instance
+        celery.app = app
+
+    return celery
 
 
-class ProductionConfig(Config):
-    """Production configuration."""
+# Create a default Celery instance for importing tasks
+celery = make_celery()
 
-    DEBUG = False
-    TESTING = False
 
-    # Ensure PostgreSQL in production
-    DATABASE_URL = os.environ.get("DATABASE_URL")
-    if not DATABASE_URL or DATABASE_URL.startswith("sqlite"):
-        raise ValueError(
-            "Production requires PostgreSQL. Set DATABASE_URL environment variable."
+@celery.task(bind=True)
+def run_simulation_task(self, simulation_id):
+    """
+    Background task to run epidemiological simulations.
+
+    Args:
+        simulation_id: ID of the simulation to run
+    """
+    try:
+        # Import here to avoid circular imports
+        from .models.database import Simulation, db
+        from .models.epidemiological import (
+            create_seir_model,
+            create_agent_based_model,
+            create_network_model,
+        )
+        from .models.ml_forecasting import create_forecaster
+        import pandas as pd
+        import numpy as np
+        from datetime import datetime
+
+        # Get simulation
+        simulation = Simulation.query.get(simulation_id)
+        if not simulation:
+            raise ValueError(f"Simulation {simulation_id} not found")
+
+        # Update status
+        simulation.status = "running"
+        simulation.started_at = datetime.utcnow()
+        db.session.commit()
+
+        # Get parameters
+        params = simulation.get_parameters()
+        model_type = simulation.model_type
+
+        # Run simulation based on type
+        if model_type == "seir":
+            results = run_seir_simulation(simulation, params)
+        elif model_type == "agent_based":
+            results = run_agent_based_simulation(simulation, params)
+        elif model_type == "network":
+            results = run_network_simulation(simulation, params)
+        elif model_type == "ml_forecast":
+            results = run_ml_forecast_simulation(simulation, params)
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+
+        # Save results
+        simulation.set_results(results)
+        simulation.status = "completed"
+        simulation.completed_at = datetime.utcnow()
+
+        # Calculate execution time
+        simulation.calculate_execution_time()
+
+        db.session.commit()
+
+        return {
+            "status": "completed",
+            "simulation_id": simulation_id,
+            "results": results,
+        }
+
+    except Exception as e:
+        # Update simulation status on failure
+        try:
+            simulation = Simulation.query.get(simulation_id)
+            if simulation:
+                simulation.status = "failed"
+                simulation.completed_at = datetime.utcnow()
+                error_results = {"error": str(e), "task_id": self.request.id}
+                simulation.set_results(error_results)
+                db.session.commit()
+        except Exception:
+            pass  # Don't fail on cleanup
+
+        # Re-raise the original exception
+        raise
+
+
+@celery.task(bind=True)
+def process_dataset_task(self, dataset_id):
+    """
+    Background task to process uploaded datasets.
+
+    Args:
+        dataset_id: ID of the dataset to process
+    """
+    try:
+        from .models.database import Dataset, DataPoint, db
+        import pandas as pd
+
+        # Get dataset
+        dataset = Dataset.query.get(dataset_id)
+        if not dataset:
+            raise ValueError(f"Dataset {dataset_id} not found")
+
+        # Update status
+        dataset.processing_status = "processing"
+        dataset.processing_started_at = datetime.utcnow()
+        db.session.commit()
+
+        # Process the dataset (this is a placeholder for actual processing)
+        # In a real implementation, you'd read the file and process it
+
+        # Update statistics
+        dataset.update_statistics()
+
+        # Mark as completed
+        dataset.processing_status = "completed"
+        dataset.processing_completed_at = datetime.utcnow()
+        dataset.is_validated = True
+
+        db.session.commit()
+
+        return {
+            "status": "completed",
+            "dataset_id": dataset_id,
+            "total_records": dataset.total_records,
+        }
+
+    except Exception as e:
+        # Update dataset status on failure
+        try:
+            dataset = Dataset.query.get(dataset_id)
+            if dataset:
+                dataset.processing_status = "failed"
+                dataset.processing_completed_at = datetime.utcnow()
+                dataset.validation_errors = str(e)
+                db.session.commit()
+        except Exception:
+            pass
+
+        raise
+
+
+def run_seir_simulation(simulation, params):
+    """Run SEIR model simulation."""
+    try:
+        from .models.epidemiological import create_seir_model
+        import numpy as np
+
+        model = create_seir_model(params)
+
+        time_points = np.linspace(
+            0, params.get("time_horizon", 365), params.get("time_steps", 365)
         )
 
-    SQLALCHEMY_DATABASE_URI = DATABASE_URL
+        # Get initial conditions
+        population = params.get("population", 100000)
+        initial_conditions = params.get(
+            "initial_conditions", {"S": population - 1, "E": 0, "I": 1, "R": 0}
+        )
 
-    # Stricter security settings
-    if not Config.SECRET_KEY or len(Config.SECRET_KEY) < 32:
-        raise ValueError("Production requires a strong SECRET_KEY (32+ characters)")
+        results = model.simulate(initial_conditions, time_points)
 
-    # Production logging
-    LOG_LEVEL = os.environ.get("LOG_LEVEL", "WARNING")
+        r0 = model.calculate_r0()
+        peak_time, peak_infections = model.calculate_peak_infection(initial_conditions)
 
-    # Require HTTPS in production
-    PREFERRED_URL_SCHEME = "https"
-
-    # Production rate limits
-    RATELIMIT_DEFAULT = "1000 per hour"
-
-
-class TestingConfig(Config):
-    """Testing configuration."""
-
-    DEBUG = True
-    TESTING = True
-
-    # Use in-memory database for testing
-    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
-
-    # Disable CSRF for easier testing
-    WTF_CSRF_ENABLED = False
-
-    # Shorter JWT expiration for testing
-    JWT_EXPIRATION_DELTA = 300  # 5 minutes
-
-    # Disable rate limiting in tests
-    RATELIMIT_ENABLED = False
-
-    # Test-specific settings
-    CELERY_TASK_ALWAYS_EAGER = True
-    CELERY_TASK_EAGER_PROPAGATES = True
+        return {
+            "time": results.time.tolist(),
+            "susceptible": results.susceptible.tolist(),
+            "exposed": results.exposed.tolist(),
+            "infectious": results.infectious.tolist(),
+            "recovered": results.recovered.tolist(),
+            "r0": float(r0),
+            "peak_time": float(peak_time),
+            "peak_infections": float(peak_infections),
+            "model_type": "seir",
+            "parameters": results.parameters,
+        }
+    except Exception as e:
+        raise ValueError(f"SEIR simulation failed: {str(e)}")
 
 
-class DockerConfig(Config):
-    """Docker-specific configuration."""
+def run_agent_based_simulation(simulation, params):
+    """Run agent-based model simulation."""
+    try:
+        from .models.epidemiological import create_agent_based_model
 
-    # Use environment variables for all external services
-    REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
-    CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
-    CELERY_RESULT_BACKEND = os.environ.get(
-        "CELERY_RESULT_BACKEND", "redis://redis:6379/0"
-    )
+        model = create_agent_based_model(params)
+        time_steps = params.get("time_steps", 100)
+        results = model.simulate(time_steps)
 
-    # Database for Docker
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL", "postgresql://phip_user:phip_password@postgres:5432/phip_db"
-    )
+        return {
+            "time": results["time"],
+            "susceptible": results["S"],
+            "exposed": results["E"],
+            "infectious": results["I"],
+            "recovered": results["R"],
+            "model_type": "agent_based",
+            "parameters": params,
+        }
+    except Exception as e:
+        raise ValueError(f"Agent-based simulation failed: {str(e)}")
 
 
-# Configuration mapping
-config = {
-    "development": DevelopmentConfig,
-    "production": ProductionConfig,
-    "testing": TestingConfig,
-    "docker": DockerConfig,
-    "default": DevelopmentConfig,
+def run_network_simulation(simulation, params):
+    """Run network-based model simulation."""
+    try:
+        from .models.epidemiological import create_network_model
+
+        model = create_network_model(params)
+        num_nodes = params.get("population_size", 1000)
+        model.create_network(num_nodes)
+
+        time_steps = params.get("time_steps", 100)
+        transmission_rate = params.get("transmission_rate", 0.1)
+        recovery_rate = params.get("recovery_rate", 0.1)
+
+        results = model.simulate_transmission(
+            transmission_rate, recovery_rate, time_steps
+        )
+
+        return {
+            "time": results["time"],
+            "susceptible": results["S"],
+            "infectious": results["I"],
+            "recovered": results["R"],
+            "model_type": "network",
+            "parameters": params,
+        }
+    except Exception as e:
+        raise ValueError(f"Network simulation failed: {str(e)}")
+
+
+def run_ml_forecast_simulation(simulation, params):
+    """Run machine learning forecasting simulation."""
+    try:
+        from .models.database import Dataset, DataPoint, Forecast
+        from .models.ml_forecasting import create_forecaster
+        import pandas as pd
+        from datetime import datetime, timedelta
+
+        dataset_id = simulation.dataset_id
+        if not dataset_id:
+            raise ValueError("ML forecasting requires a dataset")
+
+        dataset = Dataset.query.get(dataset_id)
+        if not dataset:
+            raise ValueError("Dataset not found")
+
+        # Get data points
+        data_points = (
+            DataPoint.query.filter_by(dataset_id=dataset_id)
+            .order_by(DataPoint.timestamp)
+            .all()
+        )
+
+        if not data_points:
+            raise ValueError("Dataset contains no data points")
+
+        # Prepare data for ML model
+        data_list = []
+        for dp in data_points:
+            row = {
+                "date": dp.timestamp,
+                "infectious": dp.infectious or 0,
+                "new_cases": dp.new_cases or 0,
+                "deaths": dp.deaths or 0,
+            }
+            if dp.exposed is not None:
+                row["exposed"] = dp.exposed
+            if dp.recovered is not None:
+                row["recovered"] = dp.recovered
+            if dp.susceptible is not None:
+                row["susceptible"] = dp.susceptible
+
+            data_list.append(row)
+
+        df = pd.DataFrame(data_list)
+
+        if df.empty:
+            raise ValueError("No valid data found for forecasting")
+
+        model_type = params.get("ml_model_type", "ensemble")
+        forecaster = create_forecaster(model_type)
+
+        target_col = params.get("target_column", "new_cases")
+        forecast_horizon = params.get("forecast_horizon", 30)
+
+        if target_col not in df.columns:
+            available_cols = list(df.columns)
+            raise ValueError(
+                f"Target column '{target_col}' not found. Available: {available_cols}"
+            )
+
+        # Run forecasting
+        forecast_result = forecaster.forecast(df, target_col, forecast_horizon)
+
+        # Save forecast records
+        forecast_date = datetime.utcnow()
+        for i, prediction in enumerate(forecast_result.predictions):
+            target_date = forecast_date + timedelta(days=i + 1)
+
+            forecast = Forecast(
+                simulation_id=simulation.id,
+                forecast_date=forecast_date,
+                target_date=target_date,
+                predicted_value=float(prediction),
+                forecast_type=target_col,
+                model_version="1.0",
+            )
+
+            if forecast_result.confidence_intervals:
+                forecast.lower_bound = float(forecast_result.confidence_intervals[0][i])
+                forecast.upper_bound = float(forecast_result.confidence_intervals[1][i])
+
+            db.session.add(forecast)
+
+        db.session.commit()
+
+        return {
+            "predictions": forecast_result.predictions.tolist(),
+            "confidence_intervals": {
+                "lower": (
+                    forecast_result.confidence_intervals[0].tolist()
+                    if forecast_result.confidence_intervals
+                    else None
+                ),
+                "upper": (
+                    forecast_result.confidence_intervals[1].tolist()
+                    if forecast_result.confidence_intervals
+                    else None
+                ),
+            },
+            "metrics": forecast_result.model_metrics,
+            "feature_importance": forecast_result.feature_importance,
+            "model_type": "ml_forecast",
+            "parameters": params,
+        }
+    except Exception as e:
+        raise ValueError(f"ML forecasting failed: {str(e)}")
+
+
+# Periodic tasks
+@celery.task
+def cleanup_old_simulations():
+    """Clean up old completed simulations."""
+    try:
+        from .models.database import Simulation, db
+        from datetime import datetime, timedelta
+
+        # Delete simulations older than 30 days
+        cutoff_date = datetime.utcnow() - timedelta(days=30)
+        old_simulations = Simulation.query.filter(
+            Simulation.created_at < cutoff_date,
+            Simulation.status.in_(["completed", "failed"]),
+        ).all()
+
+        count = 0
+        for sim in old_simulations:
+            db.session.delete(sim)
+            count += 1
+
+        db.session.commit()
+
+        return f"Cleaned up {count} old simulations"
+
+    except Exception as e:
+        return f"Cleanup failed: {str(e)}"
+
+
+@celery.task
+def health_check_task():
+    """Periodic health check task."""
+    try:
+        from .models.database import db
+        from sqlalchemy import text
+
+        # Test database connection
+        with db.engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+
+        return {
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "database": "connected",
+        }
+
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "error": str(e),
+        }
+
+
+# Beat schedule for periodic tasks
+celery.conf.beat_schedule = {
+    "cleanup-old-simulations": {
+        "task": "src.tasks.cleanup_old_simulations",
+        "schedule": 86400.0,  # Daily
+    },
+    "health-check": {
+        "task": "src.tasks.health_check_task",
+        "schedule": 300.0,  # Every 5 minutes
+    },
 }
 
-
-def get_config():
-    """Get the configuration based on environment."""
-    env = os.environ.get("FLASK_ENV", "development").lower()
-    config_class = config.get(env, config["default"])
-
-    # Validate configuration
-    if hasattr(config_class, "validate"):
-        config_class.validate()
-
-    return config_class
+celery.conf.timezone = "UTC"
