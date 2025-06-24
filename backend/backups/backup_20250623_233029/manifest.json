@@ -1,0 +1,10 @@
+{
+    "version": "20250623_233029",
+    "timestamp": "2025-06-23T19:30:30Z",
+    "environment": "local",
+    "components": {
+        "database": false,
+        "app_data": true,
+        "uploads": true
+    }
+}

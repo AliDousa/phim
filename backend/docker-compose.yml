@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: phip_postgres_local
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-phip_db}
+      POSTGRES_USER: ${POSTGRES_USER:-phip_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # We have REMOVED the problematic init-db.sql mount
+    ports:
+      - "5432:5432"
+    networks:
+      - phip_network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-phip_user} -d ${POSTGRES_DB:-phip_db}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache & Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: phip_redis_local
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - phip_network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Main Flask Application
+  phip-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    container_name: phip_backend_local
+    restart: unless-stopped
+    environment:
+      FLASK_ENV: ${FLASK_ENV:-development} # Set to development
+      SECRET_KEY: ${SECRET_KEY}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-phip_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-phip_db}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/0
+    volumes:
+      # This line mounts your code into the container for live reloading
+      - ./src:/app/src
+      - app_data:/app/data
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - phip_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_data:
+
+
+networks:
+  phip_network:
+    driver: bridge

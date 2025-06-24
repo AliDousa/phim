@@ -1,15 +1,25 @@
 # Core Flask and web framework
 Flask==3.1.0
 flask-cors==6.0.0
+flask-limiter
+flask_caching
+prometheus_flask_exporter
 Werkzeug==3.1.3
 
-# Database
+# Database & Driver
 Flask-SQLAlchemy==3.1.1
-PyMySQL==1.1.1
+SQLAlchemy
+psycopg2-binary # Replaced PyMySQL for PostgreSQL support
 
-# Authentication
+# Asynchronous Tasks
+celery
+redis
+
+# Authentication & Security
 PyJWT==2.10.1
 cryptography==44.0.0
+bleach
+python-magic
 
 # Data processing and analysis
 pandas==2.3.0
@@ -19,6 +29,11 @@ numpy==2.2.6
 scikit-learn==1.7.0
 scipy==1.15.3
 joblib==1.5.1
+
+# Monitoring & Error Tracking
+sentry-sdk
+structlog
+prometheus-client
 
 # Utilities
 python-dateutil==2.9.0.post0
@@ -34,13 +49,3 @@ blinker==1.9.0
 
 # Threading
 threadpoolctl==3.6.0
-
-# Development and testing (optional)
-# pytest==8.0.0
-# pytest-flask==1.3.0
-# black==24.0.0
-# flake8==7.0.0
-
-# Production server (optional)
-# gunicorn==21.2.0
-# waitress==3.0.0
