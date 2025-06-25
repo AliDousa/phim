@@ -1,4 +1,7 @@
 import React, { useState, useCallback } from 'react';
+import SimulationManager from '@/components/SimulationManager';
+import DatasetManager from '@/components/DatasetManager';
+import VisualizationDashboard from '@/components/VisualizationDashboard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -455,11 +458,11 @@ function App() {
       case 'dashboard':
         return <Dashboard onSelectSimulation={handleSelectSimulation} />;
       case 'simulations':
-        return <div className="p-8"><h1>Simulations Manager</h1></div>;
+        return <SimulationManager onSelectSimulation={handleSelectSimulation} />;
       case 'datasets':
-        return <div className="p-8"><h1>Dataset Manager</h1></div>;
+        return <DatasetManager />;
       case 'visualize':
-        return <div className="p-8"><h1>Visualization Dashboard</h1></div>;
+        return <VisualizationDashboard simulationId={selectedSimId} />;
       default:
         return <Dashboard onSelectSimulation={handleSelectSimulation} />;
     }
