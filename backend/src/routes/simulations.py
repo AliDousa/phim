@@ -12,24 +12,14 @@ import time
 import traceback
 
 # Import with fallback for different execution contexts
-try:
-    from ..models.database import Simulation, Dataset, Forecast, User, db, AuditLog
-    from ..models.epidemiological import (
-        create_seir_model,
-        create_agent_based_model,
-        create_network_model,
-    )
-    from ..models.ml_forecasting import create_forecaster, create_parameter_estimator
-    from ..auth import token_required, PermissionManager
-except ImportError:
-    from models.database import Simulation, Dataset, Forecast, User, db, AuditLog
-    from models.epidemiological import (
-        create_seir_model,
-        create_agent_based_model,
-        create_network_model,
-    )
-    from models.ml_forecasting import create_forecaster, create_parameter_estimator
-    from auth import token_required, PermissionManager
+from src.models.database import Simulation, Dataset, Forecast, User, db, AuditLog
+from src.models.epidemiological import (
+    create_seir_model,
+    create_agent_based_model,
+    create_network_model,
+)
+from src.models.ml_forecasting import create_forecaster, create_parameter_estimator
+from src.auth import token_required, PermissionManager
 
 simulations_bp = Blueprint("simulations", __name__)
 
@@ -193,7 +183,7 @@ def run_ml_forecast_simulation(simulation, params):
         if not dataset:
             raise ValueError("Dataset not found")
 
-        from models.database import DataPoint
+        from src.models.database import DataPoint
 
         data_points = (
             DataPoint.query.filter_by(dataset_id=dataset_id)

@@ -150,6 +150,7 @@ def process_dataset_task(self, dataset_id):
     try:
         from .models.database import Dataset, DataPoint, db
         import pandas as pd
+        from datetime import datetime
 
         # Get dataset
         dataset = Dataset.query.get(dataset_id)

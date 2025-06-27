@@ -153,7 +153,9 @@ class User(db.Model, TimestampMixin):
             "id": self.id,
             "uuid": str(self.uuid),
             "username": self.username,
-            "email": self.email if include_sensitive else self.email[:3] + "***",
+            "email": (
+                self.email if include_sensitive else "******"
+            ),  # Mask email completely for non-sensitive output
             "role": self.role,
             "is_active": self.is_active,
             "is_verified": self.is_verified,

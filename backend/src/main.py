@@ -6,17 +6,21 @@ Public Health Intelligence Platform - simplified version.
 import os
 import sys
 import logging
+
+# This block allows the script to be run directly for development.
+# It adds the parent directory of 'src' ('backend') to the system path.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from flask import Flask, jsonify
 from flask_cors import CORS
 
 # Import database and models
-from .models.database import db
-from .routes.auth import auth_bp
-from .routes.datasets import datasets_bp
-from .routes.simulations import simulations_bp
-
-# Import tasks
-from .tasks import make_celery
+from src.models.database import db
+from src.routes.auth import auth_bp
+from src.routes.datasets import datasets_bp
+from src.routes.simulations import simulations_bp
+from src.tasks import make_celery
+from src.utils import ConfigValidator
 
 
 def create_app(config_name=None):
@@ -56,6 +60,18 @@ def create_app(config_name=None):
 
     # Setup health checks
     setup_health_checks(app)
+
+    # Validate configuration
+    try:
+        validation_result = ConfigValidator.validate_config(app.config)
+        if validation_result["warnings"]:
+            for warning in validation_result["warnings"]:
+                app.logger.warning(f"Configuration warning: {warning}")
+        if not validation_result["valid"]:
+            for error in validation_result["errors"]:
+                app.logger.error(f"Configuration error: {error}")
+    except Exception as e:
+        app.logger.warning(f"Configuration validation failed: {e}")
 
     return app
 
@@ -209,8 +225,8 @@ def setup_health_checks(app):
 def initialize_database():
     """Initialize database tables."""
     try:
-        # Import all models to ensure they're registered
-        from .models.database import (
+        # Use absolute import now that the path is set
+        from src.models.database import (
             User,
             Dataset,
             DataPoint,

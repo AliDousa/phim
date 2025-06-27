@@ -8,10 +8,7 @@ from functools import wraps
 from flask import request, jsonify, current_app
 
 # Import with fallback for different execution contexts
-try:
-    from .models.database import User, db
-except ImportError:
-    from models.database import User, db
+from src.models.database import User, db, Dataset, Simulation
 
 
 class AuthManager:
@@ -217,8 +214,6 @@ class PermissionManager:
             True if user can access dataset
         """
         try:
-            from models.database import Dataset
-
             if user.role == "admin":
                 return True
 
@@ -244,8 +239,6 @@ class PermissionManager:
             True if user can access simulation
         """
         try:
-            from models.database import Simulation
-
             if user.role == "admin":
                 return True
 

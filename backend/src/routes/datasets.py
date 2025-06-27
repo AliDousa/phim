@@ -11,17 +11,14 @@ import uuid
 from werkzeug.utils import secure_filename
 
 # Import with fallback for different execution contexts
-try:
-    from ..models.database import Dataset, DataPoint, User, db, AuditLog
-    from ..auth import token_required, PermissionManager
-except ImportError:
-    from models.database import Dataset, DataPoint, User, db, AuditLog
-    from auth import token_required, PermissionManager
+from src.models.database import Dataset, DataPoint, User, db, AuditLog
+from src.auth import token_required, PermissionManager
 
 datasets_bp = Blueprint("datasets", __name__)
 
 # Configuration
 ALLOWED_EXTENSIONS = {"csv", "json"}
+# Consider making this configurable via environment variables or app config
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
 
@@ -121,7 +118,11 @@ def parse_and_insert_data(df, dataset_id, column_mapping):
 
         except Exception as e:
             # Log the error but continue processing other rows
-            print(f"Error processing row {index}: {e}")
+            from flask import current_app
+
+            current_app.logger.warning(
+                f"Error processing row {index} for dataset {dataset_id}: {e}"
+            )  # Use current_app.logger
             continue
 
     if not data_points:
@@ -267,6 +268,11 @@ def create_dataset():
             )
 
         # Create dataset record
+        # Note: For large files, processing should be asynchronous.
+        # This current implementation processes the file synchronously,
+        # which can lead to timeouts for large uploads.
+        # Consider using Celery or a similar background task queue
+        # to handle file parsing and data insertion.
         dataset = Dataset(
             name=form_data["name"].strip(),
             description=form_data.get("description", "").strip(),
@@ -327,6 +333,15 @@ def create_dataset():
         except ValueError as ve:
             db.session.rollback()
             return jsonify({"error": str(ve)}), 400
+        except pd.errors.EmptyDataError:
+            db.session.rollback()
+            return jsonify({"error": "File appears to be empty or corrupted"}), 400
+        except pd.errors.ParserError as pe:
+            db.session.rollback()
+            return jsonify({"error": f"Failed to parse file: {str(pe)}"}), 400
+        except MemoryError:
+            db.session.rollback()
+            return jsonify({"error": "File too large to process in memory"}), 413
         except Exception as e:
             db.session.rollback()
             return jsonify({"error": f"Failed to process file: {str(e)}"}), 500
@@ -346,16 +361,23 @@ def create_dataset():
             audit_log.set_details(
                 {
                     "dataset_name": dataset.name,
-                    "filename": file.filename,
+                    "filename": secure_filename(
+                        file.filename
+                    ),  # Use secure_filename for logging
                     "points_added": points_added,
                     "column_mapping": column_mapping,
                 }
             )
             db.session.add(audit_log)
             db.session.commit()
+        except (TypeError, ValueError, AttributeError) as e:
+            # Log the audit failure, but don't prevent the main operation from succeeding
+            from flask import current_app
+            current_app.logger.error(f"Audit logging failed for dataset creation: {e}")
         except Exception as e:
-            # Don't fail the whole operation if audit logging fails
-            print(f"Audit logging failed: {e}")
+            # Catch any other unexpected errors
+            from flask import current_app
+            current_app.logger.error(f"Unexpected error in audit logging: {e}")
 
         return (
             jsonify(
@@ -426,8 +448,12 @@ def delete_dataset(dataset_id):
             audit_log.set_details({"dataset_name": dataset_name})
             db.session.add(audit_log)
             db.session.commit()
-        except Exception as e:
-            print(f"Audit logging failed: {e}")
+        except Exception as e:  # Catch specific exceptions if possible
+            from flask import current_app
+
+            current_app.logger.error(
+                f"Audit logging failed for dataset deletion: {e}"
+            )  # Use current_app.logger
 
         return jsonify({"message": "Dataset deleted successfully"}), 200
 

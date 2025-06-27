@@ -210,7 +210,7 @@ class AgentBasedModel:
         self.agents = self._initialize_agents()
 
         # Validate parameters
-        self.validate_parameters()
+        self.validate_parameters()  # Call validation after initialization
 
     def validate_parameters(self):
         """Validate model parameters."""
@@ -241,18 +241,22 @@ class AgentBasedModel:
 
         return agents
 
-    def _generate_contacts(self, num_contacts: int = 5) -> None:
-        """Generate random contacts between agents."""
+    def _generate_contacts(self, num_contacts_per_agent: int = 5) -> None:
+        """
+        Generate random contacts for each agent for the current time step.
+        This method is called per step, so contacts are dynamic.
+        For static networks, generate once in __init__.
+        """
         for agent in self.agents:
-            # Random contacts per day
-            max_contacts = min(num_contacts, self.population_size - 1)
-            if max_contacts > 0:
-                available_contacts = [
-                    i for i in range(self.population_size) if i != agent["id"]
-                ]
+            # Ensure we don't try to pick more contacts than available unique agents
+            num_possible_contacts = self.population_size - 1  # Exclude self
+            actual_contacts_to_pick = min(num_contacts_per_agent, num_possible_contacts)
+
+            if actual_contacts_to_pick > 0:
+                # Select unique contacts, excluding self
                 contacts = np.random.choice(
-                    available_contacts,
-                    size=min(max_contacts, len(available_contacts)),
+                    [i for i in range(self.population_size) if i != agent["id"]],
+                    size=actual_contacts_to_pick,
                     replace=False,
                 )
                 agent["contacts"] = contacts.tolist()

@@ -11,10 +11,8 @@ from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from typing import Dict, List, Tuple, Optional, Any
 import json
-from dataclasses import dataclass
-import warnings
-
-warnings.filterwarnings("ignore")
+from dataclasses import dataclass  # Import norm at the top
+from scipy.stats import norm  # Import norm at the top
 
 
 @dataclass
@@ -175,7 +173,10 @@ class TimeSeriesForecaster:
                 raise ValueError("Empty data arrays")
 
             # Split data (time series split)
-            test_size = min(test_size, len(X) // 3)  # Ensure reasonable split
+            min_test_size = 10  # Ensure at least 10 samples for testing
+            test_size = max(
+                min_test_size, min(test_size, len(X) // 3)
+            )  # Ensure reasonable split
             split_idx = len(X) - test_size
             X_train, X_test = X[:split_idx], X[split_idx:]
             y_train, y_test = y[:split_idx], y[split_idx:]
@@ -187,7 +188,6 @@ class TimeSeriesForecaster:
                 )
 
             return X_train, X_test, y_train, y_test
-
         except Exception as e:
             raise ValueError(f"Data preparation failed: {str(e)}")
 
@@ -384,10 +384,7 @@ class TimeSeriesForecaster:
                 z_score = 1.96
             elif confidence_level == 0.99:
                 z_score = 2.576
-            else:
-                # Approximate z-score
-                from scipy.stats import norm
-
+            else:  # Approximate z-score
                 z_score = norm.ppf((1 + confidence_level) / 2)
 
             # Calculate confidence intervals
