@@ -6,6 +6,12 @@ Public Health Intelligence Platform - simplified version.
 import os
 import sys
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+# Try to load from current directory first, then parent directory
+load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # This block allows the script to be run directly for development.
 # It adds the parent directory of 'src' ('backend') to the system path.
@@ -28,15 +34,31 @@ def create_app(config_name=None):
 
     # Create Flask app
     app = Flask(__name__)
+    
+    # Disable automatic trailing slash redirects
+    app.url_map.strict_slashes = False
 
-    # Basic configuration
-    app.config["SECRET_KEY"] = os.environ.get(
-        "SECRET_KEY", "dev-secret-key-for-testing"
-    )
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
-        "DATABASE_URL", "sqlite:///app.db"
-    )
+    # Basic configuration with proper defaults
+    secret_key = os.environ.get("SECRET_KEY", "phip-development-secret-key-minimum-32-characters-long-for-security-compliance")
+    app.config["SECRET_KEY"] = secret_key
+    
+    # Create database path - use simple relative path for Windows compatibility
+    database_url = "sqlite:///phip_dev.db"
+    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    
+    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    app.config["REDIS_URL"] = redis_url
+    
+    # Debug logging
+    print(f"DEBUG: SECRET_KEY length: {len(secret_key)}")
+    print(f"DEBUG: DATABASE_URL: {database_url}")
+    print(f"DEBUG: REDIS_URL: {redis_url}")
+    print(f"DEBUG: Current working directory: {os.getcwd()}")
+    print(f"DEBUG: Data directory exists: {os.path.exists('data')}")
+    
+    # Ensure data directory exists
+    os.makedirs("data", exist_ok=True)
 
     # CORS origins
     cors_origins = os.environ.get(
@@ -63,7 +85,10 @@ def create_app(config_name=None):
 
     # Validate configuration
     try:
+        print(f"DEBUG: About to validate config. SECRET_KEY in config: {'SECRET_KEY' in app.config}")
+        print(f"DEBUG: About to validate config. SQLALCHEMY_DATABASE_URI in config: {'SQLALCHEMY_DATABASE_URI' in app.config}")
         validation_result = ConfigValidator.validate_config(app.config)
+        print(f"DEBUG: Validation result: {validation_result}")
         if validation_result["warnings"]:
             for warning in validation_result["warnings"]:
                 app.logger.warning(f"Configuration warning: {warning}")

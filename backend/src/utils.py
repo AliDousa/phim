@@ -418,33 +418,35 @@ class ConfigValidator:
         """Validate application configuration."""
         validation_result = {"valid": True, "errors": [], "warnings": []}
 
-        # Required configuration
-        required_configs = ["SECRET_KEY", "SQLALCHEMY_DATABASE_URI", "REDIS_URL"]
+        # Required configuration (Redis is optional in development)
+        required_configs = ["SECRET_KEY", "SQLALCHEMY_DATABASE_URI"]
 
         for config_key in required_configs:
-            if not getattr(config, config_key, None):
+            # Check if config key exists in Flask config
+            config_value = config.get(config_key, None)
+            if not config_value or config_value == "":
                 validation_result["valid"] = False
                 validation_result["errors"].append(
                     f"Missing required configuration: {config_key}"
                 )
 
         # Validate SECRET_KEY strength
-        secret_key = getattr(config, "SECRET_KEY", "")
+        secret_key = config.get("SECRET_KEY", "")
         if len(secret_key) < 32:
             validation_result["warnings"].append(
                 "SECRET_KEY should be at least 32 characters long"
             )
 
         # Validate database URL
-        db_url = getattr(config, "SQLALCHEMY_DATABASE_URI", "")
-        if db_url.startswith("sqlite://") and not config.TESTING:
+        db_url = config.get("SQLALCHEMY_DATABASE_URI", "")
+        if db_url.startswith("sqlite://") and not config.get("TESTING", False):
             validation_result["warnings"].append(
                 "SQLite not recommended for production"
             )
 
         # Validate Redis URL
-        redis_url = getattr(config, "REDIS_URL", "")
-        if not redis_url.startswith("redis://"):
+        redis_url = config.get("REDIS_URL", "")
+        if redis_url and not redis_url.startswith("redis://"):
             validation_result["warnings"].append("Invalid Redis URL format")
 
         return validation_result
@@ -472,7 +474,7 @@ def cleanup_old_files(
 
 def health_check_database() -> Dict[str, Any]:
     """Perform database health check."""
-    from .models.database import db
+    from src.models.database import db
     from sqlalchemy import text
 
     try:

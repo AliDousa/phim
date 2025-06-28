@@ -3,25 +3,43 @@ Authentication API routes.
 """
 
 from flask import Blueprint, request, jsonify
-import re # Keep re import
+import re  # Keep re import
 
 # Import with fallback for different execution contexts
 from src.models.database import User, db, AuditLog
 from src.auth import AuthManager
-from src.validators import validate_json_input, validate_email_format, validate_password_strength, validate_username_format
+from src.validators import (
+    validate_json_input,
+    validate_email_format,
+    validate_password_strength,
+    validate_username_format,
+)
+from src.auth import token_required
 
 auth_bp = Blueprint("auth", __name__)
 
 
 # Validation functions moved to src/validators.py
-# Keep aliases for backward compatibility
-validate_email = validate_email_format
-validate_password = validate_password_strength
-validate_username = validate_username_format
+# Keep aliases for backward compatibility with original interface
+def validate_email(email):
+    """Validate email format - original interface."""
+    return validate_email_format(email)
+
+
+def validate_password(password):
+    """Validate password strength - original interface."""
+    return validate_password_strength(password)
+
+
+def validate_username(username):
+    """Validate username format - original interface."""
+    return validate_username_format(username)
 
 
 @auth_bp.route("/register", methods=["POST"])
-@validate_json_input(required_fields=["username", "email", "password"], optional_fields=["role"])
+@validate_json_input(
+    required_fields=["username", "email", "password"], optional_fields=["role"]
+)
 def register():
     """Register a new user."""
     try:
@@ -93,9 +111,12 @@ def register():
             audit_log.set_details({"username": username, "email": email, "role": role})
             db.session.add(audit_log)
             db.session.commit()
-        except Exception as e: # Catch specific exceptions if possible
+        except Exception as e:  # Catch specific exceptions if possible
             # Log the audit failure, but don't prevent user registration
-            from flask import current_app # Import current_app here to avoid circular dependency if not already imported
+            from flask import (
+                current_app,
+            )  # Import current_app here to avoid circular dependency if not already imported
+
             current_app.logger.error(f"Audit logging failed for user registration: {e}")
 
         # Generate token
@@ -150,9 +171,12 @@ def login():
                 audit_log.set_details({"username": username})
                 db.session.add(audit_log)
                 db.session.commit()
-            except Exception as e: # Catch specific exceptions if possible
+            except Exception as e:  # Catch specific exceptions if possible
                 from flask import current_app
-                current_app.logger.error(f"Audit logging failed for failed login attempt: {e}")
+
+                current_app.logger.error(
+                    f"Audit logging failed for failed login attempt: {e}"
+                )
 
             return jsonify({"error": "Invalid credentials"}), 401
 
@@ -171,8 +195,9 @@ def login():
             )
             db.session.add(audit_log)
             db.session.commit()
-        except Exception as e: # Catch specific exceptions if possible
+        except Exception as e:  # Catch specific exceptions if possible
             from flask import current_app
+
             current_app.logger.error(f"Audit logging failed for successful login: {e}")
 
         return (
@@ -277,8 +302,9 @@ def logout():
                     )
                     db.session.add(audit_log)
                     db.session.commit()
-                except Exception as e: # Catch specific exceptions if possible
+                except Exception as e:  # Catch specific exceptions if possible
                     from flask import current_app
+
                     current_app.logger.error(f"Audit logging failed for logout: {e}")
 
         return jsonify({"message": "Logout successful"}), 200
@@ -347,8 +373,9 @@ def change_password():
             )
             db.session.add(audit_log)
             db.session.commit()
-        except Exception as e: # Catch specific exceptions if possible
+        except Exception as e:  # Catch specific exceptions if possible
             from flask import current_app
+
             current_app.logger.error(f"Audit logging failed for password change: {e}")
 
         return jsonify({"message": "Password changed successfully"}), 200
@@ -358,7 +385,7 @@ def change_password():
         return jsonify({"error": f"Password change failed: {str(e)}"}), 500
 
 
-@auth_bp.route("/profile", methods=["GET"]) # Re-apply previous diff
+@auth_bp.route("/profile", methods=["GET"])  # Re-apply previous diff
 @token_required
 def get_profile():
     """Get current user profile."""
@@ -371,7 +398,7 @@ def get_profile():
         return jsonify({"error": f"Failed to get profile: {str(e)}"}), 500
 
 
-@auth_bp.route("/profile", methods=["PUT"]) # Re-apply previous diff
+@auth_bp.route("/profile", methods=["PUT"])  # Re-apply previous diff
 @token_required
 def update_profile():
     """Update current user profile."""
@@ -416,8 +443,9 @@ def update_profile():
             audit_log.set_details({"updated_fields": list(data.keys())})
             db.session.add(audit_log)
             db.session.commit()
-        except Exception as e: # Catch specific exceptions if possible
+        except Exception as e:  # Catch specific exceptions if possible
             from flask import current_app
+
             current_app.logger.error(f"Audit logging failed for profile update: {e}")
 
         return (

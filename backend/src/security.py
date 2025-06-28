@@ -12,11 +12,12 @@ from functools import wraps
 from flask import request, jsonify, current_app, g
 import magic
 import bleach
+import json
 from werkzeug.utils import secure_filename
 import jwt
 from datetime import datetime, timedelta
 
-from .models.database import User, AuditLog, db
+from src.models.database import User, AuditLog, db
 
 
 class SecurityManager:

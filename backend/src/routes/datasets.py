@@ -205,11 +205,25 @@ def get_datasets():
 
         datasets_data = []
         for dataset in datasets:
-            dataset_dict = dataset.to_dict()
-            # Ensure record_count is included
-            if "record_count" not in dataset_dict:
-                dataset_dict["record_count"] = len(dataset.data_points)
-            datasets_data.append(dataset_dict)
+            try:
+                dataset_dict = dataset.to_dict()
+                # Ensure record_count is included
+                if "record_count" not in dataset_dict:
+                    dataset_dict["record_count"] = dataset.data_points.count()
+                datasets_data.append(dataset_dict)
+            except Exception as e:
+                # Log error but continue with other datasets
+                from flask import current_app
+                current_app.logger.error(f"Error converting dataset {dataset.id} to dict: {e}")
+                # Add minimal dataset info
+                datasets_data.append({
+                    "id": dataset.id,
+                    "name": dataset.name or "Unknown",
+                    "data_type": dataset.data_type or "unknown",
+                    "is_validated": dataset.is_validated,
+                    "record_count": 0,
+                    "error": "Error loading dataset details"
+                })
 
         return jsonify({"datasets": datasets_data}), 200
 
@@ -508,3 +522,39 @@ def get_dataset_data(dataset_id):
 
     except Exception as e:
         return jsonify({"error": f"Failed to retrieve dataset data: {str(e)}"}), 500
+
+
+@datasets_bp.route("/<int:dataset_id>/validate", methods=["POST"])
+@token_required
+def validate_dataset(dataset_id):
+    """Validate a specific dataset."""
+    try:
+        user = request.current_user
+
+        if not PermissionManager.can_access_dataset(user, dataset_id):
+            return jsonify({"error": "Access denied"}), 403
+
+        dataset = Dataset.query.get(dataset_id)
+        if not dataset:
+            return jsonify({"error": "Dataset not found"}), 404
+
+        # Update dataset statistics and validation status
+        try:
+            dataset.update_statistics()
+            dataset.is_validated = True
+            dataset.validation_errors = None
+            db.session.commit()
+
+            return jsonify({
+                "message": "Dataset validated successfully",
+                "dataset": dataset.to_dict()
+            }), 200
+
+        except Exception as e:
+            dataset.is_validated = False
+            dataset.validation_errors = str(e)
+            db.session.commit()
+            return jsonify({"error": f"Validation failed: {str(e)}"}), 400
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to validate dataset: {str(e)}"}), 500

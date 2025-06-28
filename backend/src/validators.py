@@ -6,7 +6,7 @@ import json
 import re
 from functools import wraps
 from flask import request, jsonify
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 
 def validate_json_input(required_fields: List[str] = None, optional_fields: List[str] = None):
@@ -138,7 +138,7 @@ def validate_email_format(email: str) -> bool:
     return re.match(pattern, email) is not None
 
 
-def validate_password_strength(password: str) -> tuple[bool, str]:
+def validate_password_strength(password: str) -> Tuple[bool, str]:
     """
     Validate password strength.
     
@@ -180,7 +180,7 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
     return True, "Password is valid"
 
 
-def validate_username_format(username: str) -> tuple[bool, str]:
+def validate_username_format(username: str) -> Tuple[bool, str]:
     """
     Validate username format.
     

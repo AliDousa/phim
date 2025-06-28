@@ -327,7 +327,7 @@ class MetricsCollector:
         def collect_user_metrics(self):
             """Collect user activity metrics."""
             try:
-                from .models.database import User, AuditLog
+                from src.models.database import User, AuditLog
                 from datetime import datetime, timedelta
 
                 # Count active users in last 24 hours
@@ -367,7 +367,7 @@ class HealthChecker:
     def check_database_health():
         """Check database connection health."""
         try:
-            from .models.database import db
+            from src.models.database import db
             from sqlalchemy import text
 
             with db.engine.connect() as connection:

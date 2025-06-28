@@ -396,6 +396,10 @@ def create_simulation():
         if not isinstance(parameters, dict):
             return jsonify({"error": "Parameters must be a JSON object"}), 400
 
+        # Validate model-specific requirements
+        if data["model_type"] == "ml_forecast" and not dataset_id:
+            return jsonify({"error": "ML forecast simulations require a dataset"}), 400
+
         # Create simulation record
         simulation = Simulation(
             name=data["name"].strip(),
@@ -747,3 +751,43 @@ def get_simulation_types():
 
     except Exception as e:
         return jsonify({"error": f"Failed to get simulation types: {str(e)}"}), 500
+
+
+@simulations_bp.route("/<int:simulation_id>/run", methods=["POST"])
+@token_required
+def run_simulation_endpoint(simulation_id):
+    """Re-run an existing simulation."""
+    try:
+        user = request.current_user
+
+        simulation = Simulation.query.get(simulation_id)
+        if not simulation:
+            return jsonify({"error": "Simulation not found"}), 404
+
+        # Check permission
+        if simulation.user_id != user.id and user.role != "admin":
+            return jsonify({"error": "Access denied"}), 403
+
+        # Reset simulation status
+        simulation.status = "pending"
+        simulation.started_at = None
+        simulation.completed_at = None
+        simulation.execution_time = None
+        db.session.commit()
+
+        # Start simulation in background
+        from flask import current_app
+        thread = threading.Thread(
+            target=run_simulation_async,
+            args=(simulation.id, current_app.app_context())
+        )
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({
+            "message": "Simulation restarted successfully",
+            "simulation": simulation.to_dict()
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to run simulation: {str(e)}"}), 500

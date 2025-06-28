@@ -69,13 +69,13 @@ def run_simulation_task(self, simulation_id):
     """
     try:
         # Import here to avoid circular imports
-        from .models.database import Simulation, db
-        from .models.epidemiological import (
+        from src.models.database import Simulation, db
+        from src.models.epidemiological import (
             create_seir_model,
             create_agent_based_model,
             create_network_model,
         )
-        from .models.ml_forecasting import create_forecaster
+        from src.models.ml_forecasting import create_forecaster
         import pandas as pd
         import numpy as np
         from datetime import datetime
@@ -148,7 +148,7 @@ def process_dataset_task(self, dataset_id):
         dataset_id: ID of the dataset to process
     """
     try:
-        from .models.database import Dataset, DataPoint, db
+        from src.models.database import Dataset, DataPoint, db
         import pandas as pd
         from datetime import datetime
 
@@ -199,7 +199,7 @@ def process_dataset_task(self, dataset_id):
 def run_seir_simulation(simulation, params):
     """Run SEIR model simulation."""
     try:
-        from .models.epidemiological import create_seir_model
+        from src.models.epidemiological import create_seir_model
         import numpy as np
 
         model = create_seir_model(params)
@@ -238,7 +238,7 @@ def run_seir_simulation(simulation, params):
 def run_agent_based_simulation(simulation, params):
     """Run agent-based model simulation."""
     try:
-        from .models.epidemiological import create_agent_based_model
+        from src.models.epidemiological import create_agent_based_model
 
         model = create_agent_based_model(params)
         time_steps = params.get("time_steps", 100)
@@ -260,7 +260,7 @@ def run_agent_based_simulation(simulation, params):
 def run_network_simulation(simulation, params):
     """Run network-based model simulation."""
     try:
-        from .models.epidemiological import create_network_model
+        from src.models.epidemiological import create_network_model
 
         model = create_network_model(params)
         num_nodes = params.get("population_size", 1000)
@@ -289,8 +289,8 @@ def run_network_simulation(simulation, params):
 def run_ml_forecast_simulation(simulation, params):
     """Run machine learning forecasting simulation."""
     try:
-        from .models.database import Dataset, DataPoint, Forecast
-        from .models.ml_forecasting import create_forecaster
+        from src.models.database import Dataset, DataPoint, Forecast
+        from src.models.ml_forecasting import create_forecaster
         import pandas as pd
         from datetime import datetime, timedelta
 
@@ -400,7 +400,7 @@ def run_ml_forecast_simulation(simulation, params):
 def cleanup_old_simulations():
     """Clean up old completed simulations."""
     try:
-        from .models.database import Simulation, db
+        from src.models.database import Simulation, db
         from datetime import datetime, timedelta
 
         # Delete simulations older than 30 days
@@ -427,7 +427,7 @@ def cleanup_old_simulations():
 def health_check_task():
     """Periodic health check task."""
     try:
-        from .models.database import db
+        from src.models.database import db
         from sqlalchemy import text
 
         # Test database connection

@@ -1,0 +1,107 @@
+[
+  {
+    "date": "2023-01-01",
+    "location": "Boston",
+    "new_cases": 850,
+    "new_deaths": 8,
+    "population": 695506
+  },
+  {
+    "date": "2023-01-01",
+    "location": "Chicago",
+    "new_cases": 1420,
+    "new_deaths": 12,
+    "population": 2693976
+  },
+  {
+    "date": "2023-01-01",
+    "location": "Miami",
+    "new_cases": 980,
+    "new_deaths": 9,
+    "population": 467963
+  },
+  {
+    "date": "2023-01-02",
+    "location": "Boston",
+    "new_cases": 920,
+    "new_deaths": 10,
+    "population": 695506
+  },
+  {
+    "date": "2023-01-02",
+    "location": "Chicago",
+    "new_cases": 1380,
+    "new_deaths": 11,
+    "population": 2693976
+  },
+  {
+    "date": "2023-01-02",
+    "location": "Miami",
+    "new_cases": 1050,
+    "new_deaths": 12,
+    "population": 467963
+  },
+  {
+    "date": "2023-01-03",
+    "location": "Boston",
+    "new_cases": 780,
+    "new_deaths": 6,
+    "population": 695506
+  },
+  {
+    "date": "2023-01-03",
+    "location": "Chicago",
+    "new_cases": 1250,
+    "new_deaths": 9,
+    "population": 2693976
+  },
+  {
+    "date": "2023-01-03",
+    "location": "Miami",
+    "new_cases": 890,
+    "new_deaths": 7,
+    "population": 467963
+  },
+  {
+    "date": "2023-01-04",
+    "location": "Boston",
+    "new_cases": 820,
+    "new_deaths": 7,
+    "population": 695506
+  },
+  {
+    "date": "2023-01-04",
+    "location": "Chicago",
+    "new_cases": 1320,
+    "new_deaths": 10,
+    "population": 2693976
+  },
+  {
+    "date": "2023-01-04",
+    "location": "Miami",
+    "new_cases": 940,
+    "new_deaths": 8,
+    "population": 467963
+  },
+  {
+    "date": "2023-01-05",
+    "location": "Boston",
+    "new_cases": 750,
+    "new_deaths": 5,
+    "population": 695506
+  },
+  {
+    "date": "2023-01-05",
+    "location": "Chicago",
+    "new_cases": 1180,
+    "new_deaths": 8,
+    "population": 2693976
+  },
+  {
+    "date": "2023-01-05",
+    "location": "Miami",
+    "new_cases": 820,
+    "new_deaths": 6,
+    "population": 467963
+  }
+]
