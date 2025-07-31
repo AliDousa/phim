@@ -420,23 +420,6 @@ class HealthChecker:
             return False, f"Disk space check failed: {str(e)}"
 
 
-def setup_logging(app):
-    """Setup application logging."""
-
-    # Create logs directory
-    log_dir = app.config.get("LOG_DIR", "logs")
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-
-    # Setup structured logging
-    structured_logger = StructuredLogger(app)
-
-    # Setup metrics collector
-    metrics_collector = MetricsCollector(app)
-
-    return structured_logger
-
-
 # Custom log filters
 class SecurityLogFilter(logging.Filter):
     """Filter for security-related log messages."""

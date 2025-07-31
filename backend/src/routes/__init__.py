@@ -11,8 +11,9 @@ try:
     from .auth import auth_bp
     from .datasets import datasets_bp
     from .simulations import simulations_bp
+    from .admin import admin_bp
 
-    __all__ = ["auth_bp", "datasets_bp", "simulations_bp"]
+    __all__ = ["auth_bp", "datasets_bp", "simulations_bp", "admin_bp"]
 
 except ImportError as e:
     print(f"Warning: Could not import all routes: {e}")

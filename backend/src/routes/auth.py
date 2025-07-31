@@ -2,38 +2,16 @@
 Authentication API routes.
 """
 
-from flask import Blueprint, request, jsonify
-import re  # Keep re import
+from flask import Blueprint, request, jsonify, current_app
 
-# Import with fallback for different execution contexts
 from src.models.database import User, db, AuditLog
-from src.auth import AuthManager
-from src.validators import (
+from src.auth import AuthManager, token_required
+from src.security import (
     validate_json_input,
-    validate_email_format,
-    validate_password_strength,
-    validate_username_format,
+    InputSanitizer,
 )
-from src.auth import token_required
 
 auth_bp = Blueprint("auth", __name__)
-
-
-# Validation functions moved to src/validators.py
-# Keep aliases for backward compatibility with original interface
-def validate_email(email):
-    """Validate email format - original interface."""
-    return validate_email_format(email)
-
-
-def validate_password(password):
-    """Validate password strength - original interface."""
-    return validate_password_strength(password)
-
-
-def validate_username(username):
-    """Validate username format - original interface."""
-    return validate_username_format(username)
 
 
 @auth_bp.route("/register", methods=["POST"])
@@ -44,14 +22,6 @@ def register():
     """Register a new user."""
     try:
         data = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON data provided"}), 400
-
-        # Validate required fields
-        required_fields = ["username", "email", "password"]
-        for field in required_fields:
-            if field not in data or not data[field]:
-                return jsonify({"error": f"{field} is required"}), 400
 
         username = data["username"].strip()
         email = data["email"].strip().lower()
@@ -59,14 +29,14 @@ def register():
         role = data.get("role", "analyst")
 
         # Validate input
-        is_valid_username, username_message = validate_username(username)
+        is_valid_username, username_message = InputSanitizer.validate_username(username)
         if not is_valid_username:
             return jsonify({"error": username_message}), 400
 
-        if not validate_email(email):
+        if not InputSanitizer.validate_email(email):
             return jsonify({"error": "Invalid email format"}), 400
 
-        is_valid_password, password_message = validate_password(password)
+        is_valid_password, password_message = InputSanitizer.validate_password(password)
         if not is_valid_password:
             return jsonify({"error": password_message}), 400
 
@@ -112,11 +82,7 @@ def register():
             db.session.add(audit_log)
             db.session.commit()
         except Exception as e:  # Catch specific exceptions if possible
-            # Log the audit failure, but don't prevent user registration
-            from flask import (
-                current_app,
-            )  # Import current_app here to avoid circular dependency if not already imported
-
+            # Log the audit failure, but don't prevent user registration            
             current_app.logger.error(f"Audit logging failed for user registration: {e}")
 
         # Generate token
@@ -144,20 +110,17 @@ def login():
     """Authenticate user and return token."""
     try:
         data = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON data provided"}), 400
-
-        # Validate required fields
-        if not data.get("username") or not data.get("password"):
-            return jsonify({"error": "Username and password are required"}), 400
+        print(f"DEBUG - Login attempt: {data}")  # Debug line
 
         username = data["username"].strip()
         password = data["password"]
+        print(f"DEBUG - Username: '{username}', Password length: {len(password)}")  # Debug line
 
         # Rate limiting could be added here
 
         # Authenticate user
         user = AuthManager.authenticate_user(username, password)
+        print(f"DEBUG - Auth result: {user}")  # Debug line
 
         if not user:
             # Log failed login attempt
@@ -171,9 +134,7 @@ def login():
                 audit_log.set_details({"username": username})
                 db.session.add(audit_log)
                 db.session.commit()
-            except Exception as e:  # Catch specific exceptions if possible
-                from flask import current_app
-
+            except Exception as e:
                 current_app.logger.error(
                     f"Audit logging failed for failed login attempt: {e}"
                 )
@@ -195,9 +156,7 @@ def login():
             )
             db.session.add(audit_log)
             db.session.commit()
-        except Exception as e:  # Catch specific exceptions if possible
-            from flask import current_app
-
+        except Exception as e:
             current_app.logger.error(f"Audit logging failed for successful login: {e}")
 
         return (
@@ -302,9 +261,7 @@ def logout():
                     )
                     db.session.add(audit_log)
                     db.session.commit()
-                except Exception as e:  # Catch specific exceptions if possible
-                    from flask import current_app
-
+                except Exception as e:
                     current_app.logger.error(f"Audit logging failed for logout: {e}")
 
         return jsonify({"message": "Logout successful"}), 200
@@ -344,7 +301,7 @@ def change_password():
             return jsonify({"error": "Current password is incorrect"}), 400
 
         # Validate new password
-        is_valid, password_message = validate_password(new_password)
+        is_valid, password_message = InputSanitizer.validate_password(new_password)
         if not is_valid:
             return jsonify({"error": password_message}), 400
 
@@ -373,9 +330,7 @@ def change_password():
             )
             db.session.add(audit_log)
             db.session.commit()
-        except Exception as e:  # Catch specific exceptions if possible
-            from flask import current_app
-
+        except Exception as e:
             current_app.logger.error(f"Audit logging failed for password change: {e}")
 
         return jsonify({"message": "Password changed successfully"}), 200
@@ -413,7 +368,7 @@ def update_profile():
         # Update allowed fields
         if "email" in data:
             new_email = data["email"].strip().lower()
-            if not validate_email(new_email):
+            if not InputSanitizer.validate_email(new_email):
                 return jsonify({"error": "Invalid email format"}), 400
 
             # Check if email is already taken by another user
@@ -443,9 +398,7 @@ def update_profile():
             audit_log.set_details({"updated_fields": list(data.keys())})
             db.session.add(audit_log)
             db.session.commit()
-        except Exception as e:  # Catch specific exceptions if possible
-            from flask import current_app
-
+        except Exception as e:
             current_app.logger.error(f"Audit logging failed for profile update: {e}")
 
         return (

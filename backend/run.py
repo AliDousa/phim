@@ -26,7 +26,7 @@ def main():
 
         # Initialize database
         with app.app_context():
-            if not initialize_database():
+            if not initialize_database(app):
                 print("Failed to initialize database. Exiting...")
                 sys.exit(1)
 

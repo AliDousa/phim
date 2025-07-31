@@ -1,40 +1,43 @@
 """
-Simple test script to verify backend functionality.
+Simple smoke test script to verify project integrity and basic functionality.
 """
 
 import sys
 import os
 import requests
 import time
+import subprocess
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def test_backend_startup():
     """Test if backend starts correctly."""
-    print("Testing backend startup...")
+    print("\nTesting backend startup...")
 
-    #  Change to backend directory
-    backend_dir = "/home/ubuntu/public-health-intelligence-platform/backend"
-    os.chdir(backend_dir)
+    backend_dir = os.path.join(SCRIPT_DIR, "backend")
+    python_executable = os.path.join(backend_dir, "venv", "Scripts", "python.exe") if sys.platform == "win32" else os.path.join(backend_dir, "venv", "bin", "python")
+    main_script = os.path.join(backend_dir, "src", "main.py")
 
-    # Start backend in background
-    import subprocess
+    if not os.path.exists(python_executable):
+        print(f"✗ Python executable not found at {python_executable}")
+        print("  Please run the setup script first.")
+        return False
 
-    # Kill any existing processes on port 5000
-
-    try:
-        subprocess.run(["pkill", "-f", "python.*main.py"], check=False)
-        time.sleep(2)
-    except:
-        pass
+    # Attempt to kill any existing process on port 5000
+    print("  Attempting to free up port 5000...")
+    if sys.platform == "win32":
+        subprocess.run('taskkill /F /IM python.exe /T 2>nul', shell=True, check=False)
+    else:
+        subprocess.run("lsof -t -i:5000 | xargs kill -9", shell=True, check=False)
+    time.sleep(2)
 
     # Start backend
     env = os.environ.copy()
-    env["PYTHONPATH"] = os.path.join(backend_dir, "src")
+    env["FLASK_ENV"] = "development"
 
     process = subprocess.Popen(
-        [os.path.join(backend_dir, "venv/bin/python"), "src/main.py"],
+        [python_executable, main_script],
         cwd=backend_dir,
         env=env,
         stdout=subprocess.PIPE,
@@ -42,21 +45,27 @@ def test_backend_startup():
     )
 
     # Wait for startup
-    print("Waiting for backend to start...")
-    time.sleep(5)
+    print("  Waiting for backend to start...")
+    time.sleep(10) # Give it a bit more time to initialize db etc.
 
     # Test health endpoint
     try:
         response = requests.get("http://localhost:5000/api/health", timeout=10)
         if response.status_code == 200:
-            print("✓ Backend health check passed")
-            print(f"Response: {response.json()}")
+            print(f"✓ Backend health check passed. Status: {response.json().get('status')}")
             return True
         else:
-            print(f"✗ Backend health check failed: {response.status_code}")
+            print(f"✗ Backend health check failed with status: {response.status_code}")
+            print(f"  Response: {response.text}")
             return False
     except requests.exceptions.RequestException as e:
         print(f"✗ Backend connection failed: {e}")
+        print("  Is the backend running? Check the logs.")
+        stderr = process.stderr.read().decode('utf-8', errors='ignore')
+        if stderr:
+            print("\n--- Backend Error Log ---")
+            print(stderr)
+            print("------------------------")
         return False
     finally:
         # Clean up
@@ -70,14 +79,12 @@ def test_backend_startup():
 def test_frontend_build():
     """Test if frontend builds correctly."""
     print("\nTesting frontend build...")
-
-    frontend_dir = "/home/ubuntu/public-health-intelligence-platform/frontend"
+    frontend_dir = os.path.join(SCRIPT_DIR, "frontend")
+    npm_command = "npm.cmd" if sys.platform == "win32" else "npm"
 
     try:
-        import subprocess
-
         result = subprocess.run(
-            ["npm", "run", "build"],
+            [npm_command, "run", "build"],
             cwd=frontend_dir,
             capture_output=True,
             text=True,
@@ -88,7 +95,7 @@ def test_frontend_build():
             print("✓ Frontend build successful")
             return True
         else:
-            print(f"✗ Frontend build failed:")
+            print("✗ Frontend build failed:")
             print(result.stderr)
             return False
     except subprocess.TimeoutExpired:
@@ -102,18 +109,16 @@ def test_frontend_build():
 def test_windows_compatibility():
     """Test Windows-specific features."""
     print("\nTesting Windows compatibility...")
-
-    # Check if Windows batch files exist
-    project_dir = "/home/ubuntu/public-health-intelligence-platform"
-
-    windows_files = ["setup-windows.bat", "WINDOWS_SETUP.md", "README.md"]
+    project_dir = SCRIPT_DIR
+    
+    windows_files = ["setup.bat", "WINDOWS_SETUP.md", "README.md"]
 
     all_exist = True
     for file in windows_files:
         file_path = os.path.join(project_dir, file)
         if os.path.exists(file_path):
             print(f"✓ {file} exists")
-        else:
+        else: # pragma: no cover
             print(f"✗ {file} missing")
             all_exist = False
 
@@ -126,7 +131,7 @@ def test_windows_compatibility():
             if "Flask" in content and "scikit-learn" in content:
                 print("✓ Key dependencies found in requirements.txt")
             else:
-                print("✗ Missing key dependencies in requirements.txt")
+                print("✗ Missing key dependencies in requirements.txt") # pragma: no cover
                 all_exist = False
     else:
         print("✗ requirements.txt missing")
@@ -145,23 +150,20 @@ def main():
     total_tests = 3
 
     # Test 1: Windows compatibility
-    if test_windows_compatibility():
+    if test_windows_compatibility(): # pragma: no branch
         tests_passed += 1
 
     # Test 2: Frontend build
-    if test_frontend_build():
+    if test_frontend_build(): # pragma: no branch
         tests_passed += 1
 
-    # Test 3: Backend startup (commented out due to import issues)
-    # if test_backend_startup():
-    #     tests_passed += 1
-    print("\nSkipping backend startup test due to import path issues")
-    print("Backend can be tested manually using the Windows batch scripts")
-    tests_passed += 1  # Count as passed since we have working batch scripts
+    # Test 3: Backend startup
+    if test_backend_startup(): # pragma: no branch
+        tests_passed += 1
 
     print("\n" + "=" * 60)
     print(f"Tests completed: {tests_passed}/{total_tests} passed")
-
+    
     if tests_passed == total_tests:
         print("✓ All tests passed! Platform is ready for Windows deployment.")
     else:

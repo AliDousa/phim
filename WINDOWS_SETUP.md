@@ -65,6 +65,37 @@ For MySQL on Windows:
    - DB_PASSWORD=password
    - DB_NAME=mydb
 
+## Database Migrations (Recommended)
+
+For development, the application automatically creates the database tables using `db.create_all()`. For a more robust setup that handles database schema changes over time, it is highly recommended to use database migrations with `Flask-Migrate`.
+
+### 1. Install Flask-Migrate
+This should be added to your `requirements.txt` file.
+```cmd
+pip install Flask-Migrate
+```
+
+### 2. Initialize the Migration Repository
+Run this command **once** in the `backend` directory to create the `migrations` folder.
+```cmd
+venv\Scripts\activate
+set FLASK_APP=src/main.py
+flask db init
+```
+
+### 3. Create and Apply Migrations
+Whenever you change your database models (e.g., in `src/models/database.py`), you need to create a new migration script and apply it to the database.
+
+**Create a migration script:**
+```cmd
+flask db migrate -m "A short description of the changes"
+```
+
+**Apply the migration to the database:**
+```cmd
+flask db upgrade
+```
+
 ### Environment Variables (Windows)
 Create a `.env` file in the backend directory:
 ```
@@ -193,11 +224,10 @@ All npm packages work on Windows:
 
 ## Testing on Windows
 
-### Backend Test
+### Smoke Test (Manual)
+This script verifies that the project files are in place and that the backend and frontend can start and build. Run this from the project's root directory.
 ```cmd
-cd backend
-venv\Scripts\activate
-python ..\test_models.py
+python integration_test.py
 ```
 
 ### Frontend Test
@@ -254,4 +284,3 @@ For Windows-specific issues:
 2. Ensure all prerequisites are properly installed
 3. Try running as Administrator if permission issues occur
 4. Use Windows-compatible paths (backslashes work, but forward slashes are preferred)
-

@@ -7,56 +7,32 @@ from datetime import datetime, timedelta
 from functools import wraps
 from flask import request, jsonify, current_app
 
-# Import with fallback for different execution contexts
 from src.models.database import User, db, Dataset, Simulation
+from src.security import AuthenticationSecurity
 
 
 class AuthManager:
     """Authentication and authorization manager."""
 
     @staticmethod
-    def generate_token(user_id: int, expires_in: int = 3600) -> str:
-        """
-        Generate JWT token for user.
+    def generate_token(user_id: int) -> str:
+        """Generate JWT access token for user."""
+        # Delegate to the more secure token generator
+        auth_sec = AuthenticationSecurity(current_app)
+        return auth_sec.generate_secure_token(user_id, token_type="access")
 
-        Args:
-            user_id: User ID
-            expires_in: Token expiration time in seconds
-
-        Returns:
-            JWT token string
-        """
-        payload = {
-            "user_id": user_id,
-            "exp": datetime.utcnow() + timedelta(seconds=expires_in),
-            "iat": datetime.utcnow(),
-        }
-
-        return jwt.encode(payload, current_app.config["SECRET_KEY"], algorithm="HS256")
+    @staticmethod
+    def generate_refresh_token(user_id: int) -> str:
+        """Generate JWT refresh token for user."""
+        auth_sec = AuthenticationSecurity(current_app)
+        return auth_sec.generate_secure_token(user_id, token_type="refresh")
 
     @staticmethod
     def verify_token(token: str) -> dict:
-        """
-        Verify JWT token and return payload.
-
-        Args:
-            token: JWT token string
-
-        Returns:
-            Token payload or None if invalid
-        """
-        try:
-            payload = jwt.decode(
-                token, current_app.config["SECRET_KEY"], algorithms=["HS256"]
-            )
-            return payload
-        except jwt.ExpiredSignatureError:
-            return None
-        except jwt.InvalidTokenError:
-            return None
-        except Exception:
-            # Catch any other JWT-related exceptions
-            return None
+        """Verify JWT token and return payload."""
+        # Delegate to the more secure token verifier
+        auth_sec = AuthenticationSecurity(current_app)
+        return auth_sec.verify_secure_token(token)
 
     @staticmethod
     def authenticate_user(username: str, password: str) -> User:
@@ -71,17 +47,32 @@ class AuthManager:
             User object if authenticated, None otherwise
         """
         try:
+            auth_sec = AuthenticationSecurity(current_app)
+
+            # Check for brute-force attempts before hitting the DB
+            is_blocked = auth_sec.check_failed_logins(username)
+            print(f"DEBUG - User {username} blocked: {is_blocked}")
+            if is_blocked:
+                return None  # Account is temporarily locked
+
             # Try to find user by username or email
             user = User.query.filter(
                 (User.username == username) | (User.email == username)
             ).first()
+            print(f"DEBUG - User found: {user}")
 
-            if user and user.check_password(password) and user.is_active:
-                return user
+            if user:
+                password_ok = user.check_password(password)
+                print(f"DEBUG - Password check: {password_ok}, Active: {user.is_active}")
+                if password_ok and user.is_active:
+                    auth_sec.clear_failed_logins(username)
+                    return user
 
+            auth_sec.record_failed_login(username)
             return None
-        except Exception:
+        except Exception as e:
             # Log error in production, for now return None
+            current_app.logger.error(f"Authentication error for user {username}: {e}")
             return None
 
     @staticmethod
@@ -101,9 +92,11 @@ class AuthManager:
                 user = User.query.get(payload["user_id"])
                 if user and user.is_active:
                     return user
-
             return None
-        except Exception:
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError) as e:
+            current_app.logger.warning(
+                f"Token verification failed during get_current_user: {e}"
+            )
             return None
 
 
@@ -119,13 +112,10 @@ def token_required(f):
         # Get token from Authorization header
         if "Authorization" in request.headers:
             auth_header = request.headers["Authorization"]
-            try:
-                # Support both "Bearer <token>" and just "<token>"
-                if auth_header.startswith("Bearer "):
-                    token = auth_header.split(" ")[1]
-                else:
-                    token = auth_header
-            except IndexError:
+            parts = auth_header.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                token = parts[1]
+            else:
                 return jsonify({"error": "Invalid authorization header format"}), 401
 
         if not token:
@@ -136,18 +126,14 @@ def token_required(f):
         if not payload:
             return jsonify({"error": "Token is invalid or expired"}), 401
 
-        # Get current user
-        try:
-            current_user = User.query.get(payload["user_id"])
-            if not current_user or not current_user.is_active:
-                return jsonify({"error": "User not found or inactive"}), 401
+        # Get current user from payload
+        current_user = AuthManager.get_current_user(token)
+        if not current_user:
+            return jsonify({"error": "User not found or inactive"}), 401
 
-            # Add current user to request context
-            request.current_user = current_user
-
-            return f(*args, **kwargs)
-        except Exception as e:
-            return jsonify({"error": "Authentication failed"}), 401
+        # Add current user to request context
+        request.current_user = current_user
+        return f(*args, **kwargs)
 
     return decorated
 
@@ -223,7 +209,10 @@ class PermissionManager:
 
             # Users can access their own datasets
             return dataset.user_id == user.id
-        except Exception:
+        except Exception as e:
+            current_app.logger.error(
+                f"Error checking dataset permission for user {user.id} on dataset {dataset_id}: {e}"
+            )
             return False
 
     @staticmethod
@@ -248,7 +237,10 @@ class PermissionManager:
 
             # Users can access their own simulations
             return simulation.user_id == user.id
-        except Exception:
+        except Exception as e:
+            current_app.logger.error(
+                f"Error checking simulation permission for user {user.id} on simulation {simulation_id}: {e}"
+            )
             return False
 
     @staticmethod
@@ -269,5 +261,8 @@ class PermissionManager:
 
             # Users can modify themselves
             return current_user.id == target_user_id
-        except Exception:
+        except Exception as e:
+            current_app.logger.error(
+                f"Error checking user modification permission for user {current_user.id} on target {target_user_id}: {e}"
+            )
             return False

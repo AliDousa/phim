@@ -1,6 +1,5 @@
 """
-Minimal Flask application entry point for development.
-Public Health Intelligence Platform - simplified version.
+Main application entry point for the Public Health Intelligence Platform.
 """
 
 import os
@@ -11,22 +10,26 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 # Try to load from current directory first, then parent directory
 load_dotenv()
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 # This block allows the script to be run directly for development.
 # It adds the parent directory of 'src' ('backend') to the system path.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 
 # Import database and models
 from src.models.database import db
 from src.routes.auth import auth_bp
 from src.routes.datasets import datasets_bp
 from src.routes.simulations import simulations_bp
+from src.routes.admin import admin_bp
 from src.tasks import make_celery
-from src.utils import ConfigValidator
+from src.config import get_config
+from src.security import SecurityException
+from src.utils import setup_logging as setup_app_logging
 
 
 def create_app(config_name=None):
@@ -34,42 +37,19 @@ def create_app(config_name=None):
 
     # Create Flask app
     app = Flask(__name__)
-    
+
+    # Load configuration
+    if config_name is None:
+        config_name = os.environ.get("FLASK_ENV", "development")
+
+    config = get_config(config_name)
+    app.config.from_object(config)
+
     # Disable automatic trailing slash redirects
     app.url_map.strict_slashes = False
 
-    # Basic configuration with proper defaults
-    secret_key = os.environ.get("SECRET_KEY", "phip-development-secret-key-minimum-32-characters-long-for-security-compliance")
-    app.config["SECRET_KEY"] = secret_key
-    
-    # Create database path - use simple relative path for Windows compatibility
-    database_url = "sqlite:///phip_dev.db"
-    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-    app.config["REDIS_URL"] = redis_url
-    
-    # Debug logging
-    print(f"DEBUG: SECRET_KEY length: {len(secret_key)}")
-    print(f"DEBUG: DATABASE_URL: {database_url}")
-    print(f"DEBUG: REDIS_URL: {redis_url}")
-    print(f"DEBUG: Current working directory: {os.getcwd()}")
-    print(f"DEBUG: Data directory exists: {os.path.exists('data')}")
-    
-    # Ensure data directory exists
-    os.makedirs("data", exist_ok=True)
-
-    # CORS origins
-    cors_origins = os.environ.get(
-        "CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
-    )
-    app.config["CORS_ORIGINS"] = cors_origins.split(",")
-
-    # Setup basic logging
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
-    )
+    # Setup structured logging
+    setup_app_logging(app)
 
     # Initialize extensions
     initialize_extensions(app)
@@ -83,21 +63,6 @@ def create_app(config_name=None):
     # Setup health checks
     setup_health_checks(app)
 
-    # Validate configuration
-    try:
-        print(f"DEBUG: About to validate config. SECRET_KEY in config: {'SECRET_KEY' in app.config}")
-        print(f"DEBUG: About to validate config. SQLALCHEMY_DATABASE_URI in config: {'SQLALCHEMY_DATABASE_URI' in app.config}")
-        validation_result = ConfigValidator.validate_config(app.config)
-        print(f"DEBUG: Validation result: {validation_result}")
-        if validation_result["warnings"]:
-            for warning in validation_result["warnings"]:
-                app.logger.warning(f"Configuration warning: {warning}")
-        if not validation_result["valid"]:
-            for error in validation_result["errors"]:
-                app.logger.error(f"Configuration error: {error}")
-    except Exception as e:
-        app.logger.warning(f"Configuration validation failed: {e}")
-
     return app
 
 
@@ -110,9 +75,7 @@ def initialize_extensions(app):
     # CORS
     CORS(
         app,
-        origins=app.config.get(
-            "CORS_ORIGINS", ["http://localhost:3000", "http://localhost:5173"]
-        ),
+        origins=app.config["CORS_ORIGINS"],
         supports_credentials=True,
     )
 
@@ -127,62 +90,38 @@ def register_blueprints(app):
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(datasets_bp, url_prefix="/api/datasets")
     app.register_blueprint(simulations_bp, url_prefix="/api/simulations")
+    app.register_blueprint(admin_bp, url_prefix="/api/admin")
 
 
 def register_error_handlers(app):
     """Register application error handlers."""
 
-    @app.errorhandler(400)
-    def bad_request(error):
-        return (
-            jsonify(
-                {
-                    "error": "Bad request",
-                    "message": "The request could not be understood",
-                    "status_code": 400,
-                }
-            ),
-            400,
-        )
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(e):
+        """Return JSON instead of HTML for HTTP errors."""
+        response = e.get_response()
+        response.data = jsonify(
+            {
+                "code": e.code,
+                "name": e.name,
+                "description": e.description,
+            }
+        ).data
+        response.content_type = "application/json"
+        return response
 
-    @app.errorhandler(401)
-    def unauthorized(error):
-        return (
-            jsonify(
-                {
-                    "error": "Unauthorized",
-                    "message": "Authentication required",
-                    "status_code": 401,
-                }
-            ),
-            401,
+    @app.errorhandler(SecurityException)
+    def handle_security_exception(e):
+        """Handle custom security exceptions for validation errors."""
+        app.logger.warning(
+            f"Security exception: {e.message} from {request.remote_addr if request else 'unknown'}"
         )
-
-    @app.errorhandler(403)
-    def forbidden(error):
-        return (
-            jsonify(
-                {
-                    "error": "Forbidden",
-                    "message": "Insufficient permissions",
-                    "status_code": 403,
-                }
-            ),
-            403,
-        )
-
-    @app.errorhandler(404)
-    def not_found(error):
-        return (
-            jsonify(
-                {
-                    "error": "Not found",
-                    "message": "The requested resource was not found",
-                    "status_code": 404,
-                }
-            ),
-            404,
-        )
+        response_data = {
+            "code": e.status_code,
+            "name": "Validation Error",
+            "description": e.message,
+        }
+        return jsonify(response_data), e.status_code
 
     @app.errorhandler(500)
     def internal_error(error):
@@ -191,9 +130,9 @@ def register_error_handlers(app):
         return (
             jsonify(
                 {
-                    "error": "Internal server error",
-                    "message": "An unexpected error occurred",
-                    "status_code": 500,
+                    "code": 500,
+                    "name": "Internal Server Error",
+                    "description": "An unexpected internal error occurred.",
                 }
             ),
             500,
@@ -217,6 +156,7 @@ def setup_health_checks(app):
                     "auth": "/api/auth",
                     "datasets": "/api/datasets",
                     "simulations": "/api/simulations",
+                    "admin": "/api/admin",
                     "health": "/health",
                 },
             }
@@ -247,7 +187,7 @@ def setup_health_checks(app):
         return health_check()
 
 
-def initialize_database():
+def initialize_database(app):
     """Initialize database tables."""
     try:
         # Use absolute import now that the path is set
@@ -272,51 +212,60 @@ def initialize_database():
         return False
 
 
-# Create application instance
-app = create_app()
+# This is the application instance that a WSGI server like Gunicorn will use.
+# It respects the FLASK_ENV environment variable for production deployments.
+app = create_app(os.environ.get("FLASK_ENV", "development"))
 
-# Initialize database on startup
-with app.app_context():
-    if not initialize_database():
-        app.logger.error("Failed to initialize database")
+
+def run_development_server():
+    """
+    Sets up and runs the application with a development configuration.
+    This function is intended to be called only when running the script directly.
+    """
+    # When running directly, ALWAYS use the development configuration.
+    # This prevents accidentally running with production settings locally.
+    dev_app = create_app("development")
+    # Development server only
+    dev_app.logger.info("=" * 60)
+    dev_app.logger.info("Public Health Intelligence Platform - Development")
+    dev_app.logger.info("=" * 60)
+    dev_app.logger.info(
+        f"Starting development server in '{dev_app.config.get('ENV', 'unknown')}' mode..."
+    )
+
+    # Initialize database
+    with dev_app.app_context():
+        if not initialize_database(dev_app):
+            dev_app.logger.error("Failed to initialize database. Exiting...")
+            sys.exit(1)
+
+    dev_app.logger.info("✓ Application initialized successfully")
+    dev_app.logger.info("Server Information:")
+    dev_app.logger.info(f"  Backend API: http://localhost:5000")
+    dev_app.logger.info(f"  Health Check: http://localhost:5000/health")
+    dev_app.logger.info("")
+    dev_app.logger.info("Available endpoints:")
+    dev_app.logger.info("  Authentication: /api/auth/*")
+    dev_app.logger.info("  Datasets: /api/datasets/*")
+    dev_app.logger.info("  Simulations: /api/simulations/*")
+    dev_app.logger.info("  Admin: /api/admin/*")
+    dev_app.logger.info("")
+    dev_app.logger.info("Press Ctrl+C to stop the server")
+    dev_app.logger.info("=" * 60)
+
+    try:
+        dev_app.run(
+            host="0.0.0.0",
+            port=int(os.environ.get("PORT", 5000)),
+            debug=dev_app.config.get("DEBUG", False),
+            threaded=True,
+        )
+    except KeyboardInterrupt:
+        dev_app.logger.info("\nServer stopped by user")
+    except Exception as e:
+        dev_app.logger.error(f"Server error: {e}")
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    # Development server only
-    app.logger.info("=" * 60)
-    app.logger.info("Public Health Intelligence Platform - Development")
-    app.logger.info("=" * 60)
-    app.logger.info("Starting development server...")
-
-    # Initialize database
-    with app.app_context():
-        if not initialize_database():
-            app.logger.error("Failed to initialize database. Exiting...")
-            sys.exit(1)
-
-    app.logger.info("✓ Application initialized successfully")
-    app.logger.info("Server Information:")
-    app.logger.info(f"  Backend API: http://localhost:5000")
-    app.logger.info(f"  Health Check: http://localhost:5000/health")
-    app.logger.info("")
-    app.logger.info("Available endpoints:")
-    app.logger.info("  Authentication: /api/auth/*")
-    app.logger.info("  Datasets: /api/datasets/*")
-    app.logger.info("  Simulations: /api/simulations/*")
-    app.logger.info("")
-    app.logger.info("Press Ctrl+C to stop the server")
-    app.logger.info("=" * 60)
-
-    try:
-        app.run(
-            host="0.0.0.0",
-            port=int(os.environ.get("PORT", 5000)),
-            debug=True,
-            threaded=True,
-        )
-    except KeyboardInterrupt:
-        app.logger.info("\nServer stopped by user")
-    except Exception as e:
-        app.logger.error(f"Server error: {e}")
-        sys.exit(1)
+    run_development_server()

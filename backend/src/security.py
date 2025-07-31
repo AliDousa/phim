@@ -17,6 +17,7 @@ from werkzeug.utils import secure_filename
 import jwt
 from datetime import datetime, timedelta
 
+from typing import Dict, Any, List, Optional, Tuple
 from src.models.database import User, AuditLog, db
 
 
@@ -170,15 +171,19 @@ class FileUploadSecurity:
 
     def __init__(self, app=None):
         self.app = app
-        self.allowed_mime_types = {
-            "text/csv": [".csv"],
-            "application/json": [".json"],
-            "text/plain": [".txt"],
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
-                ".xlsx"
-            ],
-        }
-        self.max_file_size = 100 * 1024 * 1024  # 100MB
+        if app:
+            self.allowed_mime_types = app.config.get("ALLOWED_MIME_TYPES", {})
+            self.max_file_size = app.config.get("MAX_CONTENT_LENGTH", 100 * 1024 * 1024)
+        else:
+            self.allowed_mime_types = {
+                "text/csv": [".csv"],
+                "application/json": [".json"],
+                "text/plain": [".txt"],
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
+                    ".xlsx"
+                ],
+            }
+            self.max_file_size = 100 * 1024 * 1024  # 100MB
         self.blocked_extensions = {".exe", ".bat", ".cmd", ".scr", ".pif", ".com"}
 
     def validate_file(self, file):
@@ -497,6 +502,93 @@ class InputSanitizer:
 
         return sanitized
 
+    @staticmethod
+    def validate_email(email: str) -> bool:
+        """Validate email format using regex."""
+        if not isinstance(email, str):
+            return False
+        pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+        return re.match(pattern, email) is not None
+
+    @staticmethod
+    def validate_password(password: str) -> Tuple[bool, str]:
+        """
+        Validate password strength.
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if not password or not isinstance(password, str):
+            return False, "Password is required"
+
+        if len(password) < 8:
+            return False, "Password must be at least 8 characters long"
+
+        if len(password) > 128:
+            return False, "Password cannot exceed 128 characters"
+
+        if not re.search(r"[A-Z]", password):
+            return False, "Password must contain at least one uppercase letter"
+
+        if not re.search(r"[a-z]", password):
+            return False, "Password must contain at least one lowercase letter"
+
+        if not re.search(r"\d", password):
+            return False, "Password must contain at least one digit"
+
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+            return False, "Password must contain at least one special character"
+
+        # Check for common weak passwords
+        weak_passwords = [
+            "password",
+            "123456",
+            "password123",
+            "admin",
+            "qwerty",
+            "letmein",
+            "welcome",
+            "monkey",
+            "1234567890",
+        ]
+        if password.lower() in weak_passwords:
+            return False, "Password is too common and weak"
+
+        return True, "Password is valid"
+
+    @staticmethod
+    def validate_username(username: str) -> Tuple[bool, str]:
+        """
+        Validate username format.
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if not username or not isinstance(username, str):
+            return False, "Username is required"
+
+        username = username.strip()
+
+        if len(username) < 3:
+            return False, "Username must be at least 3 characters long"
+
+        if len(username) > 80:
+            return False, "Username must be less than 80 characters"
+
+        if not re.match(r"^[a-zA-Z0-9_-]+$", username):
+            return (
+                False,
+                "Username can only contain letters, numbers, underscores, and hyphens",
+            )
+
+        if username.startswith(("-", "_")) or username.endswith(("-", "_")):
+            return False, "Username cannot start or end with special characters"
+
+        if username.isdigit():
+            return False, "Username cannot be all numbers"
+
+        return True, "Username is valid"
+
 
 class SecurityException(Exception):
     """Custom exception for security-related errors."""
@@ -505,6 +597,156 @@ class SecurityException(Exception):
         super().__init__(message)
         self.message = message
         self.status_code = status_code
+
+
+# --- Validation Decorators (migrated from validators.py) ---
+
+
+def validate_json_input(
+    required_fields: List[str] = None, optional_fields: List[str] = None
+):
+    """
+    Decorator to validate JSON input for API endpoints.
+
+    Args:
+        required_fields: List of required field names
+        optional_fields: List of optional field names
+    """
+
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not request.is_json:
+                raise SecurityException("Content-Type must be application/json", 415)
+
+            try:
+                data = request.get_json()
+            except json.JSONDecodeError:
+                raise SecurityException("Invalid JSON format", 400)
+
+            if data is None:
+                raise SecurityException("No JSON data provided", 400)
+
+            if not isinstance(data, dict):
+                raise SecurityException("JSON data must be an object", 400)
+
+            # Check required fields
+            if required_fields:
+                missing_fields = [
+                    field for field in required_fields if field not in data
+                ]
+                if missing_fields:
+                    raise SecurityException(
+                        f"Missing required fields: {', '.join(missing_fields)}", 400
+                    )
+
+            # Check for empty required fields
+            if required_fields:
+                empty_fields = [
+                    field
+                    for field in required_fields
+                    if field in data and (data[field] is None or data[field] == "")
+                ]
+                if empty_fields:
+                    raise SecurityException(
+                        f"Required fields cannot be empty: {', '.join(empty_fields)}",
+                        400,
+                    )
+
+            # Check for unexpected fields
+            all_allowed_fields = (required_fields or []) + (optional_fields or [])
+            if all_allowed_fields:
+                unexpected_fields = [
+                    field for field in data.keys() if field not in all_allowed_fields
+                ]
+                if unexpected_fields:
+                    raise SecurityException(
+                        f"Unexpected fields: {', '.join(unexpected_fields)}", 400
+                    )
+
+            return f(*args, **kwargs)
+
+        return decorated_function
+
+    return decorator
+
+
+def validate_query_params(
+    allowed_params: List[str] = None, required_params: List[str] = None
+):
+    """
+    Decorator to validate query parameters.
+
+    Args:
+        allowed_params: List of allowed parameter names
+        required_params: List of required parameter names
+    """
+
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Check required parameters
+            if required_params:
+                missing_params = [
+                    param for param in required_params if param not in request.args
+                ]
+                if missing_params:
+                    raise SecurityException(
+                        f"Missing required query parameters: {', '.join(missing_params)}",
+                        400,
+                    )
+
+            # Check for unexpected parameters
+            if allowed_params:
+                unexpected_params = [
+                    param
+                    for param in request.args.keys()
+                    if param not in allowed_params
+                ]
+                if unexpected_params:
+                    raise SecurityException(
+                        f"Unexpected query parameters: {', '.join(unexpected_params)}",
+                        400,
+                    )
+
+            return f(*args, **kwargs)
+
+        return decorated_function
+
+    return decorator
+
+
+def validate_pagination_params(max_per_page: int = 100):
+    """
+    Decorator to validate pagination parameters.
+
+    Args:
+        max_per_page: Maximum allowed items per page
+    """
+
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            try:
+                page = request.args.get("page", 1, type=int)
+                per_page = request.args.get("per_page", 20, type=int)
+
+                if page < 1:
+                    raise SecurityException("Page number must be positive", 400)
+                if per_page < 1:
+                    raise SecurityException("Items per page must be positive", 400)
+                if per_page > max_per_page:
+                    raise SecurityException(
+                        f"Items per page cannot exceed {max_per_page}", 400
+                    )
+            except (ValueError, TypeError):
+                raise SecurityException("Page and per_page must be valid integers", 400)
+
+            return f(*args, **kwargs)
+
+        return decorated_function
+
+    return decorator
 
 
 def security_required(f):

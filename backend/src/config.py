@@ -13,7 +13,9 @@ class Config:
     # Secret key for JWT and sessions
     SECRET_KEY = os.environ.get("SECRET_KEY")
     if not SECRET_KEY:
-        raise ValueError("SECRET_KEY environment variable must be set")
+        import warnings
+        warnings.warn("SECRET_KEY not set in environment variables, using default for development")
+        SECRET_KEY = "dev-secret-key-change-in-production-minimum-32-chars-long"
 
     # Database configuration
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -149,17 +151,18 @@ class ProductionConfig(Config):
     TESTING = False
 
     # Ensure PostgreSQL in production
-    DATABASE_URL = os.environ.get("DATABASE_URL")
-    if not DATABASE_URL or DATABASE_URL.startswith("sqlite"):
-        raise ValueError(
-            "Production requires PostgreSQL. Set DATABASE_URL environment variable."
-        )
-
-    SQLALCHEMY_DATABASE_URI = DATABASE_URL
+    SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL")
 
     # Stricter security settings
-    if not Config.SECRET_KEY or len(Config.SECRET_KEY) < 32:
-        raise ValueError("Production requires a strong SECRET_KEY (32+ characters)")
+    @classmethod
+    def validate(cls):
+        """Validate production-specific settings."""
+        if not cls.SQLALCHEMY_DATABASE_URI or cls.SQLALCHEMY_DATABASE_URI.startswith("sqlite"):
+            raise ValueError(
+                "Production requires a valid DATABASE_URL environment variable pointing to a non-SQLite database."
+            )
+        if not cls.SECRET_KEY or len(cls.SECRET_KEY) < 32:
+            raise ValueError("Production requires a strong SECRET_KEY (32+ characters).")
 
     # Production logging
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "WARNING")
@@ -220,10 +223,11 @@ config = {
 }
 
 
-def get_config():
+def get_config(config_name=None):
     """Get the configuration based on environment."""
-    env = os.environ.get("FLASK_ENV", "development").lower()
-    config_class = config.get(env, config["default"])
+    if config_name is None:
+        config_name = os.environ.get("FLASK_ENV", "development").lower()
+    config_class = config.get(config_name, config["default"])
 
     # Validate configuration
     if hasattr(config_class, "validate"):

@@ -1,28 +1,27 @@
-# Core Flask and web framework
+# Core Web Framework & Server
 Flask==3.1.0
-flask-cors==6.0.0
-Werkzeug==3.1.3
+Flask-Cors==6.0.0
+gunicorn==23.0.0          # Production WSGI server
 
-# Database
+# Database & Migrations
 Flask-SQLAlchemy==3.1.1
-SQLAlchemy
-psycopg2-binary
+Flask-Migrate==4.1.0
+SQLAlchemy==2.0.41
+psycopg2-binary==2.9.10     # For PostgreSQL
 
-# Asynchronous Tasks  
-celery
-redis
+# Asynchronous Tasks & Caching
+celery==5.5.3
+redis==6.2.0
 
 # Authentication & Security
 PyJWT==2.10.1
 cryptography==44.0.0
-bleach
-python-magic
+bleach==6.2.0
+python-magic==0.4.27      # See note below for system dependency
 
-# Data processing
+# Data Science & Modeling
 pandas==2.3.0
 numpy==2.2.6
-
-# Machine learning
 scikit-learn==1.7.0
 scipy==1.15.3
 
@@ -30,13 +29,15 @@ scipy==1.15.3
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.0
 pytz==2025.2
+requests>=2.32.0          # Useful for testing and integrations
 
-# Flask utilities
+# Monitoring & Logging (Optional)
+prometheus-flask-exporter>=0.23.0
+structlog>=24.2.0
+
+# Note: Jinja2, Werkzeug, itsdangerous, and click are core dependencies of Flask
+# and do not need to be listed separately unless you need to pin a specific version.
 Jinja2==3.1.4
+Werkzeug==3.1.3
 itsdangerous==2.2.0
 click==8.1.8
-
-# Optional monitoring (can be removed for minimal setup)
-# prometheus-client
-# sentry-sdk
-# structlog

@@ -16,6 +16,7 @@ The Public Health Intelligence Platform is a comprehensive, production-ready sys
 - **Backend API**: Complete Flask-based REST API with JWT authentication
 - **Frontend Application**: Modern React dashboard with responsive design
 - **Database System**: SQLite (development) and MySQL (production) support
+- **Asynchronous Task Queue**: Celery for scalable background processing of simulations and data tasks.
 - **Windows Optimization**: Full Windows compatibility with automated setup scripts
 
 ### 🧠 **Advanced Modeling Capabilities**
@@ -127,6 +128,7 @@ public-health-intelligence-platform/
 - **Framework**: Flask 3.1.0 with SQLAlchemy ORM
 - **Database**: SQLite (development), MySQL (production)
 - **Scientific Computing**: NumPy, SciPy, Pandas, Scikit-learn
+- **Asynchronous Tasks**: Celery with Redis broker
 - **Authentication**: JWT tokens with role-based access control
 - **API**: RESTful design with comprehensive documentation
 
@@ -177,7 +179,7 @@ public-health-intelligence-platform/
 
 ### **Scalability**
 - **Dataset Size**: Supports millions of data points
-- **Concurrent Users**: Designed for multi-user environments
+- **Concurrent Users**: Designed for multi-user environments with scalable Celery workers
 - **Simulation Complexity**: Handles large-scale population models
 - **Real-Time Processing**: Sub-second response times for most operations
 
@@ -265,4 +267,3 @@ public-health-intelligence-platform/
 The Public Health Intelligence Platform represents a significant achievement in epidemiological software development, combining cutting-edge technology with practical usability to create a powerful tool for public health professionals and researchers. The platform's Windows optimization ensures broad accessibility while maintaining the sophisticated capabilities needed for advanced epidemiological analysis.
 
 **Ready for immediate deployment and use in Windows environments.**
-

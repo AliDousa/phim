@@ -91,35 +91,11 @@ initialize_app() {
 # Database initialization
 init_database() {
     log_info "Initializing database..."
-    
     cd "$APP_DIR"
-    
-    # Run database initialization
-    python -c "
-import sys
-sys.path.insert(0, '/app')
 
-try:
-    from src.main import create_app
-    from src.models.database import db
-    
-    app = create_app('production')
-    with app.app_context():
-        # Create all tables
-        db.create_all()
-        print('Database tables created successfully')
-        
-        # Test database connection
-        from sqlalchemy import text
-        with db.engine.connect() as connection:
-            connection.execute(text('SELECT 1'))
-        print('Database connection verified')
-        
-except Exception as e:
-    print(f'Database initialization failed: {e}')
-    sys.exit(1)
-"
-    
+    # Use the dedicated migration script which includes initialization and a connection check
+    python scripts/run_migrations.py
+
     if [[ $? -eq 0 ]]; then
         log_info "Database initialization completed successfully"
     else
@@ -132,25 +108,7 @@ except Exception as e:
 health_check() {
     log_info "Running health check..."
     
-    # Basic application health check
-    python -c "
-import sys
-sys.path.insert(0, '/app')
-
-try:
-    from src.main import create_app
-    app = create_app('production')
-    
-    with app.test_client() as client:
-        # Test application startup
-        with app.app_context():
-            print('Application context created successfully')
-    
-    print('Health check passed')
-except Exception as e:
-    print(f'Health check failed: {e}')
-    sys.exit(1)
-"
+    python scripts/run_health_check.py
     
     if [[ $? -eq 0 ]]; then
         log_info "Health check passed"

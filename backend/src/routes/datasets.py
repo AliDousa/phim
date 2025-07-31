@@ -12,19 +12,16 @@ from werkzeug.utils import secure_filename
 
 # Import with fallback for different execution contexts
 from src.models.database import Dataset, DataPoint, User, db, AuditLog
-from src.auth import token_required, PermissionManager
+from src.auth import token_required, PermissionManager, role_required
+from src.security import (
+    FileUploadSecurity,
+    InputSanitizer,
+    SecurityException,
+    validate_pagination_params,
+)
 
 datasets_bp = Blueprint("datasets", __name__)
 
-# Configuration
-ALLOWED_EXTENSIONS = {"csv", "json"}
-# Consider making this configurable via environment variables or app config
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
-
-
-def allowed_file(filename):
-    """Check if file extension is allowed."""
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def parse_and_insert_data(df, dataset_id, column_mapping):
@@ -150,12 +147,13 @@ def get_file_headers():
         if not file or not file.filename:
             return jsonify({"error": "No selected file"}), 400
 
-        if not allowed_file(file.filename):
-            return jsonify({"error": "Unsupported file type. Use CSV or JSON."}), 400
+        # Use FileUploadSecurity for validation
+        file_validator = FileUploadSecurity()
+        file_validator.validate_file(file)
 
         # Read file headers
         try:
-            if file.filename.lower().endswith(".csv"):
+            if file.filename.lower().endswith((".csv", ".txt")):
                 df = pd.read_csv(
                     file.stream, nrows=5
                 )  # Read a few rows to detect headers
@@ -178,6 +176,8 @@ def get_file_headers():
                     # Try newline-delimited JSON
                     file.stream.seek(0)
                     df = pd.read_json(file.stream, lines=True, nrows=5)
+            elif file.filename.lower().endswith(".xlsx"):
+                df = pd.read_excel(file.stream, nrows=5)
             else:
                 return jsonify({"error": "Unsupported file type"}), 400
 
@@ -186,7 +186,9 @@ def get_file_headers():
 
         except Exception as e:
             return jsonify({"error": f"Failed to parse file: {str(e)}"}), 400
-
+    
+    except SecurityException as se:
+        return jsonify({"error": se.message}), se.status_code
     except Exception as e:
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
@@ -252,15 +254,10 @@ def create_dataset():
         if not file or not file.filename:
             return jsonify({"error": "No file selected for uploading"}), 400
 
-        # Validate file type
-        if not allowed_file(file.filename):
-            return (
-                jsonify(
-                    {"error": "Invalid file type. Only CSV and JSON files are allowed."}
-                ),
-                400,
-            )
-
+        # Use FileUploadSecurity for validation
+        file_validator = FileUploadSecurity()
+        file_validator.validate_file(file)
+        
         # Parse column mapping
         try:
             column_mapping = json.loads(form_data["column_mapping"])
@@ -288,8 +285,8 @@ def create_dataset():
         # Consider using Celery or a similar background task queue
         # to handle file parsing and data insertion.
         dataset = Dataset(
-            name=form_data["name"].strip(),
-            description=form_data.get("description", "").strip(),
+            name=InputSanitizer.sanitize_string(form_data["name"], max_length=255),
+            description=InputSanitizer.sanitize_string(form_data.get("description", ""), max_length=5000),
             data_type=form_data["data_type"],
             source=secure_filename(file.filename),
             user_id=user.id,
@@ -311,7 +308,7 @@ def create_dataset():
         try:
             file.stream.seek(0)  # Reset file pointer
 
-            if file.filename.lower().endswith(".csv"):
+            if file.filename.lower().endswith((".csv", ".txt")):
                 df = pd.read_csv(file.stream)
             elif file.filename.lower().endswith(".json"):
                 file_content = file.stream.read()
@@ -331,6 +328,8 @@ def create_dataset():
                     # Try newline-delimited JSON
                     file.stream.seek(0)
                     df = pd.read_json(file.stream, lines=True)
+            elif file.filename.lower().endswith(".xlsx"):
+                df = pd.read_excel(file.stream)
 
             # Validate DataFrame
             if df.empty:
@@ -404,6 +403,8 @@ def create_dataset():
             201,
         )
 
+    except SecurityException as se:
+        return jsonify({"error": se.message}), se.status_code
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
@@ -478,24 +479,21 @@ def delete_dataset(dataset_id):
 
 @datasets_bp.route("/<int:dataset_id>/data", methods=["GET"])
 @token_required
+@validate_pagination_params(max_per_page=1000)
 def get_dataset_data(dataset_id):
     """Get data points for a specific dataset."""
     try:
         user = request.current_user
-
         if not PermissionManager.can_access_dataset(user, dataset_id):
             return jsonify({"error": "Access denied"}), 403
 
         dataset = Dataset.query.get(dataset_id)
         if not dataset:
             return jsonify({"error": "Dataset not found"}), 404
-
         # Get pagination parameters
         page = request.args.get("page", 1, type=int)
-        per_page = min(
-            request.args.get("per_page", 100, type=int), 1000
-        )  # Max 1000 per page
-
+        per_page = request.args.get("per_page", 100, type=int)
+        
         # Query data points with pagination
         data_points = (
             DataPoint.query.filter_by(dataset_id=dataset_id)
@@ -519,7 +517,9 @@ def get_dataset_data(dataset_id):
             ),
             200,
         )
-
+    
+    except SecurityException as se:
+        return jsonify({"error": se.message}), se.status_code
     except Exception as e:
         return jsonify({"error": f"Failed to retrieve dataset data: {str(e)}"}), 500
 

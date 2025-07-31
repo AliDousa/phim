@@ -84,8 +84,11 @@ The central content area adapts based on your current section, providing relevan
 The Recent Activity panel shows chronological updates from your simulations and datasets, helping you track progress and identify completed tasks. The Quick Actions panel provides one-click access to common operations like uploading new datasets, creating SEIR simulations, generating forecasts, and viewing analytics.
 
 ### Status Indicators
-
-Throughout the interface, color-coded status indicators provide immediate feedback about system state and operation progress. Green indicators show successful operations and healthy system status. Blue indicators represent ongoing processes and active operations. Orange indicators highlight warnings or items requiring attention. Red indicators signal errors or failed operations that need immediate attention.
+Throughout the interface, status indicators provide immediate feedback about system state and operation progress. This is especially useful for tracking simulations, which now run as background tasks.
+- **Pending**: The simulation is in the queue waiting to be processed.
+- **Running**: The simulation is actively being processed by a worker.
+- **Completed**: The simulation finished successfully, and results are available.
+- **Failed**: The simulation encountered an error. You can view the error details for troubleshooting.
 
 ## Managing Datasets
 
@@ -99,11 +102,11 @@ The platform accepts CSV and JSON files containing epidemiological data. For tim
 
 To upload a new dataset, navigate to the Datasets section and click "Upload New Dataset." Select your data file and provide descriptive metadata including a meaningful name, detailed description, data type classification, and source information. This metadata helps organize your datasets and enables better collaboration with team members.
 
-The platform automatically validates uploaded data, checking for common issues like missing values, inconsistent date formats, or unexpected data types. Validation results appear immediately, highlighting any issues that need attention before the dataset can be used in simulations.
+The platform performs an initial validation on your file to check for correct format (CSV, JSON, XLSX) and size. After you confirm the upload and map your columns, the platform processes and validates the data content in the background. You can monitor the validation status in the Datasets list.
 
 ### Data Validation and Quality
 
-The validation process examines data structure, completeness, and consistency. For time-series data, the system checks for chronological ordering, identifies gaps in the timeline, and flags unusual patterns that might indicate data quality issues. Spatial data validation ensures location identifiers are consistent and recognizable.
+The background validation process examines data structure, completeness, and consistency. For time-series data, the system checks for chronological ordering, identifies gaps in the timeline, and flags unusual patterns that might indicate data quality issues. Spatial data validation ensures location identifiers are consistent and recognizable.
 
 When validation issues are detected, the platform provides specific guidance for resolution. Common issues include inconsistent date formats, missing geographic identifiers, or outlier values that may represent data entry errors. The platform suggests corrections while preserving your original data integrity.
 
@@ -115,7 +118,7 @@ Consider creating a consistent naming convention for your organization. For exam
 
 ## Running Simulations
 
-The platform offers several sophisticated epidemiological models, each suited for different types of analysis and research questions. Understanding when and how to use each model type is essential for generating meaningful insights.
+The platform offers several sophisticated epidemiological models, each suited for different types of analysis and research questions. When you start a simulation, it is processed asynchronously in the background. This means you don't have to wait for it to finish and can continue using the platform or even close your browser. You can monitor the real-time status of your simulations on the dashboard.
 
 ### SEIR Compartmental Models
 
@@ -151,9 +154,9 @@ These models are especially effective for operational planning, resource allocat
 
 ### Simulation Management
 
-The platform provides comprehensive tools for managing simulation workflows. The Simulations dashboard shows all your analyses with status indicators, completion times, and summary results. You can easily compare different scenarios, track parameter sensitivity, and organize related simulations.
+The platform provides comprehensive tools for managing simulation workflows. The Simulations dashboard shows all your analyses with real-time status indicators (`Pending`, `Running`, `Completed`, `Failed`), completion times, and summary results. The list updates automatically as simulations progress, so you always have the latest information. You can easily compare different scenarios, track parameter sensitivity, and organize related simulations.
 
-For complex analyses, consider creating simulation series that explore parameter ranges or compare intervention scenarios. The platform supports batch processing and provides tools for systematic parameter exploration. Results can be exported for further analysis or integration with external reporting systems.
+If a simulation fails, the status will change to `Failed`, and you can click on it to view the error details, which can help in troubleshooting the issue with your parameters or dataset.
 
 ## Data Visualization
 
@@ -178,10 +181,7 @@ The platform provides comprehensive model evaluation tools including accuracy me
 ### Customization Options
 
 Visualization tools include extensive customization options for colors, scales, and display formats. You can adjust chart types, modify axis ranges, and select specific data series for focused analysis. Export options include high-resolution images suitable for publications and presentations, as well as data exports for external analysis tools.
-
-### Real-Time Updates
-
-When simulations are running, visualizations update in real-time to show progress and preliminary results. This feature is particularly valuable for long-running simulations, allowing you to monitor convergence and identify potential issues early in the process.
+Once a simulation's status is `Completed`, you can click on it to view the detailed results and interactive visualizations.
 
 ## Advanced Features
 
@@ -235,7 +235,7 @@ Database initialization errors often indicate file permission issues or insuffic
 
 ### Performance Issues
 
-Large simulations may require significant computational resources and time. If simulations appear to hang or run extremely slowly, consider reducing population sizes, shortening time horizons, or simplifying model parameters. The platform includes progress indicators and estimated completion times to help assess whether simulations are progressing normally.
+Simulations now run in the background, so they will not slow down the user interface. If a simulation is in the `Running` state for an unexpectedly long time, it may be due to a very large dataset or complex parameters. If a simulation `Fails`, check the error message for details. Common causes include invalid parameters or issues with the input dataset.
 
 Memory issues may occur with very large datasets or complex simulations. Close unnecessary applications and consider upgrading system RAM if you regularly work with large-scale analyses. The platform provides memory usage monitoring to help identify resource constraints.
 
@@ -294,4 +294,3 @@ Regularly review and update your modeling practices based on new evidence and me
 ---
 
 This user guide provides comprehensive guidance for effective use of the Public Health Intelligence Platform. For additional support, consult the API documentation, contact the development team, or participate in the user community forums. The platform is designed to evolve with user needs and epidemiological research advances, ensuring continued relevance and utility for public health intelligence applications.
-

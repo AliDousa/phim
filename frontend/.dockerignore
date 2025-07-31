@@ -1,0 +1,19 @@
+# Ignore local dependencies
+node_modules
+venv
+.venv
+
+# Ignore build artifacts and logs
+npm-debug.log
+*.pyc
+__pycache__/
+
+# Ignore Git and other VCS files
+.git
+.gitignore
+
+# Ignore secrets and environment files
+.env
+
+# Ignore the dockerignore file itself
+.dockerignore

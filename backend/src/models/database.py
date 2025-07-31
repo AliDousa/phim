@@ -96,7 +96,9 @@ class User(db.Model, TimestampMixin):
 
     def check_password(self, password):
         """Check password against hash."""
-        return check_password_hash(self.password_hash, password)
+        result = check_password_hash(self.password_hash, password)
+        print(f"DEBUG - check_password: password='{password}', hash='{self.password_hash[:50]}...', result={result}")
+        return result
 
     def is_locked(self):
         """Check if account is locked."""
