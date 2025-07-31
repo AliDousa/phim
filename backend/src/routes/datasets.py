@@ -233,42 +233,74 @@ def get_datasets():
         return jsonify({"error": f"Failed to retrieve datasets: {str(e)}"}), 500
 
 
+@datasets_bp.route("/upload", methods=["POST", "OPTIONS"])
+@token_required
+def upload_dataset():
+    """Upload and create a new dataset from a file."""
+    if request.method == "OPTIONS":
+        # Handle CORS preflight request
+        response = jsonify({"status": "ok"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST,OPTIONS")
+        return response
+    
+    return create_dataset_impl()
+
 @datasets_bp.route("/", methods=["POST"])
 @token_required
 def create_dataset():
     """Create a new dataset from an uploaded file using column mapping."""
+    return create_dataset_impl()
+
+def create_dataset_impl():
+    """Implementation for creating a dataset from uploaded file."""
     try:
         user = request.current_user
-        form_data = request.form
-
-        # Validate required fields
-        required_fields = ["name", "data_type", "column_mapping"]
-        for field in required_fields:
-            if field not in form_data or not form_data[field]:
-                return jsonify({"error": f"{field} is required"}), 400
-
-        if "file" not in request.files:
-            return jsonify({"error": "No file part in the request"}), 400
-
-        file = request.files["file"]
-        if not file or not file.filename:
-            return jsonify({"error": "No file selected for uploading"}), 400
-
-        # Use FileUploadSecurity for validation
-        file_validator = FileUploadSecurity()
-        file_validator.validate_file(file)
         
-        # Parse column mapping
-        try:
-            column_mapping = json.loads(form_data["column_mapping"])
-            if not isinstance(column_mapping, dict):
-                raise ValueError("Column mapping must be a JSON object")
-        except (json.JSONDecodeError, ValueError) as e:
-            return jsonify({"error": f"Invalid column mapping format: {str(e)}"}), 400
+        # Handle both form data and JSON data
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # File upload with form data
+            form_data = request.form
+            
+            # Validate required fields
+            required_fields = ["name", "data_type"]
+            for field in required_fields:
+                if field not in form_data or not form_data[field]:
+                    return jsonify({"error": f"{field} is required"}), 400
 
+            if "file" not in request.files:
+                return jsonify({"error": "No file part in the request"}), 400
+
+            file = request.files["file"]
+            if not file or not file.filename:
+                return jsonify({"error": "No file selected for uploading"}), 400
+
+            # Use FileUploadSecurity for validation
+            file_validator = FileUploadSecurity()
+            file_validator.validate_file(file)
+            
+            # Get metadata from form
+            name = form_data.get("name")
+            description = form_data.get("description", "")
+            data_type = form_data.get("data_type", "time_series")
+            source = form_data.get("source", "File upload")
+            
+        else:
+            # JSON data without file (for programmatic API use)
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "No data provided"}), 400
+                
+            name = data.get("name")
+            description = data.get("description", "")
+            data_type = data.get("data_type", "time_series") 
+            source = data.get("source", "API")
+            file = None
+        
         # Validate data type
         valid_data_types = ["time_series", "cross_sectional", "spatial"]
-        if form_data["data_type"] not in valid_data_types:
+        if data_type not in valid_data_types:
             return (
                 jsonify(
                     {
@@ -279,85 +311,104 @@ def create_dataset():
             )
 
         # Create dataset record
-        # Note: For large files, processing should be asynchronous.
-        # This current implementation processes the file synchronously,
-        # which can lead to timeouts for large uploads.
-        # Consider using Celery or a similar background task queue
-        # to handle file parsing and data insertion.
         dataset = Dataset(
-            name=InputSanitizer.sanitize_string(form_data["name"], max_length=255),
-            description=InputSanitizer.sanitize_string(form_data.get("description", ""), max_length=5000),
-            data_type=form_data["data_type"],
-            source=secure_filename(file.filename),
+            name=InputSanitizer.sanitize_string(name, max_length=255),
+            description=InputSanitizer.sanitize_string(description, max_length=5000),
+            data_type=data_type,
+            source=secure_filename(file.filename) if file else source,
             user_id=user.id,
             is_validated=False,
+            processing_status="pending"
         )
 
         # Set metadata
         metadata = {
-            "file_size": file.content_length if hasattr(file, "content_length") else 0,
-            "column_mapping": column_mapping,
+            "file_size": getattr(file, "content_length", 0) if file else 0,
             "upload_timestamp": datetime.utcnow().isoformat(),
         }
+        
+        # Handle column mapping for file uploads
+        if file and request.content_type and 'multipart/form-data' in request.content_type:
+            column_mapping_str = form_data.get("column_mapping", "{}")
+            try:
+                column_mapping = json.loads(column_mapping_str)
+                if not isinstance(column_mapping, dict):
+                    raise ValueError("Column mapping must be a JSON object")
+                metadata["column_mapping"] = column_mapping
+            except (json.JSONDecodeError, ValueError) as e:
+                return jsonify({"error": f"Invalid column mapping format: {str(e)}"}), 400
+        
         dataset.set_metadata(metadata)
 
         db.session.add(dataset)
         db.session.flush()  # Get the ID
 
-        # Process file data
-        try:
-            file.stream.seek(0)  # Reset file pointer
+        # Process file data (if file is provided)
+        if file:
+            try:
+                file.stream.seek(0)  # Reset file pointer
 
-            if file.filename.lower().endswith((".csv", ".txt")):
-                df = pd.read_csv(file.stream)
-            elif file.filename.lower().endswith(".json"):
-                file_content = file.stream.read()
-                try:
-                    # Try regular JSON
-                    data = json.loads(file_content)
-                    if isinstance(data, list):
-                        df = pd.DataFrame(data)
-                    else:
-                        return (
-                            jsonify(
-                                {"error": "JSON file must contain an array of objects"}
-                            ),
-                            400,
-                        )
-                except json.JSONDecodeError:
-                    # Try newline-delimited JSON
-                    file.stream.seek(0)
-                    df = pd.read_json(file.stream, lines=True)
-            elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(file.stream)
+                if file.filename.lower().endswith((".csv", ".txt")):
+                    df = pd.read_csv(file.stream)
+                elif file.filename.lower().endswith(".json"):
+                    file_content = file.stream.read()
+                    try:
+                        # Try regular JSON
+                        file_data = json.loads(file_content)
+                        if isinstance(file_data, list):
+                            df = pd.DataFrame(file_data)
+                        elif isinstance(file_data, dict) and "data_points" in file_data:
+                            df = pd.DataFrame(file_data["data_points"])
+                        else:
+                            return (
+                                jsonify(
+                                    {"error": "JSON file must contain an array of objects or have a 'data_points' key"}
+                                ),
+                                400,
+                            )
+                    except json.JSONDecodeError:
+                        # Try newline-delimited JSON
+                        file.stream.seek(0)
+                        df = pd.read_json(file.stream, lines=True)
+                elif file.filename.lower().endswith(".xlsx"):
+                    df = pd.read_excel(file.stream)
+                else:
+                    return jsonify({"error": "Unsupported file format"}), 400
 
-            # Validate DataFrame
-            if df.empty:
+                # Validate DataFrame
+                if df.empty:
+                    db.session.rollback()
+                    return jsonify({"error": "File contains no data"}), 400
+
+                # Parse and insert data (only if column mapping provided)
+                if "column_mapping" in metadata:
+                    points_added = parse_and_insert_data(df, dataset.id, metadata["column_mapping"])
+                    dataset.total_records = points_added
+                    dataset.is_validated = True
+                    dataset.processing_status = "completed"
+                else:
+                    # Just store the dataset without processing data
+                    dataset.total_records = len(df)
+                    dataset.processing_status = "completed"
+
+            except ValueError as ve:
                 db.session.rollback()
-                return jsonify({"error": "File contains no data"}), 400
-
-            # Parse and insert data
-            points_added = parse_and_insert_data(df, dataset.id, column_mapping)
-
-            # Mark as validated if successful
-            dataset.is_validated = True
-            dataset.validation_errors = None
-
-        except ValueError as ve:
-            db.session.rollback()
-            return jsonify({"error": str(ve)}), 400
-        except pd.errors.EmptyDataError:
-            db.session.rollback()
-            return jsonify({"error": "File appears to be empty or corrupted"}), 400
-        except pd.errors.ParserError as pe:
-            db.session.rollback()
-            return jsonify({"error": f"Failed to parse file: {str(pe)}"}), 400
-        except MemoryError:
-            db.session.rollback()
-            return jsonify({"error": "File too large to process in memory"}), 413
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": f"Failed to process file: {str(e)}"}), 500
+                return jsonify({"error": str(ve)}), 400
+            except pd.errors.EmptyDataError:
+                db.session.rollback()
+                return jsonify({"error": "File appears to be empty or corrupted"}), 400
+            except pd.errors.ParserError as pe:
+                db.session.rollback()
+                return jsonify({"error": f"Failed to parse file: {str(pe)}"}), 400
+            except MemoryError:
+                db.session.rollback()
+                return jsonify({"error": "File too large to process in memory"}), 413
+            except Exception as e:
+                db.session.rollback()
+                return jsonify({"error": f"Failed to process file: {str(e)}"}), 500
+        else:
+            # No file provided - just create the dataset record
+            dataset.processing_status = "completed"
 
         db.session.commit()
 
@@ -371,43 +422,44 @@ def create_dataset():
                 ip_address=request.remote_addr,
                 user_agent=request.headers.get("User-Agent"),
             )
-            audit_log.set_details(
-                {
-                    "dataset_name": dataset.name,
-                    "filename": secure_filename(
-                        file.filename
-                    ),  # Use secure_filename for logging
-                    "points_added": points_added,
-                    "column_mapping": column_mapping,
-                }
-            )
+            
+            details = {
+                "dataset_name": dataset.name,
+                "data_type": dataset.data_type,
+                "source": dataset.source
+            }
+            
+            if file:
+                details["filename"] = secure_filename(file.filename)
+                if "column_mapping" in metadata:
+                    details["points_added"] = dataset.total_records
+                    details["column_mapping"] = metadata["column_mapping"]
+            
+            audit_log.set_details(details)
             db.session.add(audit_log)
             db.session.commit()
-        except (TypeError, ValueError, AttributeError) as e:
+        except Exception as e:
             # Log the audit failure, but don't prevent the main operation from succeeding
             from flask import current_app
             current_app.logger.error(f"Audit logging failed for dataset creation: {e}")
-        except Exception as e:
-            # Catch any other unexpected errors
-            from flask import current_app
-            current_app.logger.error(f"Unexpected error in audit logging: {e}")
 
         return (
             jsonify(
                 {
                     "message": "Dataset created successfully",
                     "dataset": dataset.to_dict(),
-                    "points_added": points_added,
+                    "records_processed": dataset.total_records or 0,
                 }
             ),
             201,
         )
 
     except SecurityException as se:
+        db.session.rollback()
         return jsonify({"error": se.message}), se.status_code
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
+        return jsonify({"error": f"Dataset creation failed: {str(e)}"}), 500
 
 
 @datasets_bp.route("/<int:dataset_id>", methods=["GET"])

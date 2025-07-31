@@ -204,11 +204,11 @@ def initialize_database(app):
         # Create all tables
         db.create_all()
 
-        app.logger.info("✓ Database tables created successfully")
+        app.logger.info("[OK] Database tables created successfully")
         return True
 
     except Exception as e:
-        app.logger.error(f"✗ Database initialization error: {e}")
+        app.logger.error(f"[ERROR] Database initialization error: {e}")
         return False
 
 
@@ -239,7 +239,7 @@ def run_development_server():
             dev_app.logger.error("Failed to initialize database. Exiting...")
             sys.exit(1)
 
-    dev_app.logger.info("✓ Application initialized successfully")
+    dev_app.logger.info("[OK] Application initialized successfully")
     dev_app.logger.info("Server Information:")
     dev_app.logger.info(f"  Backend API: http://localhost:5000")
     dev_app.logger.info(f"  Health Check: http://localhost:5000/health")

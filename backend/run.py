@@ -30,7 +30,7 @@ def main():
                 print("Failed to initialize database. Exiting...")
                 sys.exit(1)
 
-        print("✓ Application initialized successfully")
+        print("[OK] Application initialized successfully")
         print()
         print("Server Information:")
         print(f"  Backend API: http://localhost:5000")

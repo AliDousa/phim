@@ -96,9 +96,7 @@ class User(db.Model, TimestampMixin):
 
     def check_password(self, password):
         """Check password against hash."""
-        result = check_password_hash(self.password_hash, password)
-        print(f"DEBUG - check_password: password='{password}', hash='{self.password_hash[:50]}...', result={result}")
-        return result
+        return check_password_hash(self.password_hash, password)
 
     def is_locked(self):
         """Check if account is locked."""
@@ -513,6 +511,11 @@ class DataPoint(db.Model):
         }
 
 
+class ConcurrencyError(Exception):
+    """Raised when a database operation fails due to concurrent modification."""
+    pass
+
+
 class Simulation(db.Model, TimestampMixin):
     """Simulation model for storing model runs and results."""
 
@@ -527,8 +530,9 @@ class Simulation(db.Model, TimestampMixin):
     model_type = db.Column(db.String(50), nullable=False, index=True)
     model_version = db.Column(db.String(20), default="1.0")
 
-    # Status tracking
+    # Status tracking with optimistic locking
     status = db.Column(db.String(50), default="pending", nullable=False, index=True)
+    version = db.Column(db.Integer, default=1, nullable=False)  # Optimistic locking
     priority = db.Column(db.Integer, default=5)  # 1=highest, 10=lowest
 
     # Execution timing
@@ -675,6 +679,173 @@ class Simulation(db.Model, TimestampMixin):
 
         self.quality_score = max(0.0, min(1.0, score))
         return self.quality_score
+
+    def update_status_atomic(self, new_status, **additional_fields):
+        """
+        Atomically update simulation status using optimistic locking.
+        
+        Args:
+            new_status: New status to set
+            **additional_fields: Additional fields to update atomically
+            
+        Raises:
+            ConcurrencyError: If simulation was modified by another process
+        """
+        from sqlalchemy import text
+        
+        # Build the SET clause dynamically
+        set_fields = ["status = :new_status", "version = version + 1", "updated_at = NOW()"]
+        params = {"new_status": new_status, "sim_id": self.id, "current_version": self.version}
+        
+        # Add additional fields
+        for field_name, field_value in additional_fields.items():
+            if hasattr(self, field_name):
+                set_fields.append(f"{field_name} = :{field_name}")
+                params[field_name] = field_value
+        
+        set_clause = ", ".join(set_fields)
+        
+        sql = text(f"""
+            UPDATE simulations 
+            SET {set_clause}
+            WHERE id = :sim_id AND version = :current_version
+        """)
+        
+        result = db.session.execute(sql, params)
+        
+        if result.rowcount == 0:
+            # Refresh to get current state
+            db.session.refresh(self)
+            raise ConcurrencyError(
+                f"Simulation {self.id} was modified by another process. "
+                f"Current status: {self.status}, attempted status: {new_status}"
+            )
+        
+        # Update local object state
+        self.status = new_status
+        self.version += 1
+        for field_name, field_value in additional_fields.items():
+            if hasattr(self, field_name):
+                setattr(self, field_name, field_value)
+        
+        db.session.commit()
+        return True
+
+    def start_simulation(self, task_id=None, worker_node=None):
+        """
+        Atomically mark simulation as started.
+        
+        Args:
+            task_id: Celery task ID
+            worker_node: Worker node identifier
+            
+        Returns:
+            bool: True if successfully started, False if already running/completed
+        """
+        if self.status not in ["pending", "queued"]:
+            return False
+            
+        additional_fields = {
+            "started_at": datetime.now(timezone.utc)
+        }
+        
+        if task_id:
+            additional_fields["task_id"] = task_id
+        if worker_node:
+            additional_fields["worker_node"] = worker_node
+            
+        try:
+            self.update_status_atomic("running", **additional_fields)
+            return True
+        except ConcurrencyError:
+            # Another process already started this simulation
+            return False
+
+    def complete_simulation(self, results_dict=None, metrics_dict=None):
+        """
+        Atomically mark simulation as completed with results.
+        
+        Args:
+            results_dict: Simulation results
+            metrics_dict: Performance metrics
+        """
+        if self.status not in ["running"]:
+            raise ValueError(f"Cannot complete simulation in status: {self.status}")
+            
+        additional_fields = {
+            "completed_at": datetime.now(timezone.utc)
+        }
+        
+        if results_dict:
+            additional_fields["results"] = json.dumps(results_dict, default=str)
+        if metrics_dict:
+            additional_fields["metrics"] = json.dumps(metrics_dict, default=str)
+            
+        # Calculate execution time
+        if self.started_at:
+            execution_time = (datetime.now(timezone.utc) - self.started_at).total_seconds()
+            additional_fields["execution_time_seconds"] = execution_time
+            
+        self.update_status_atomic("completed", **additional_fields)
+        
+        # Calculate quality score after completion
+        self.calculate_quality_score()
+        db.session.commit()
+
+    def fail_simulation(self, error_message, error_details=None):
+        """
+        Atomically mark simulation as failed with error information.
+        
+        Args:
+            error_message: Error message
+            error_details: Additional error details (optional)
+        """
+        additional_fields = {
+            "completed_at": datetime.now(timezone.utc),
+            "validation_errors": error_message
+        }
+        
+        if error_details:
+            error_results = {
+                "error": error_message,
+                "details": error_details,
+                "failed_at": datetime.now(timezone.utc).isoformat()
+            }
+            additional_fields["results"] = json.dumps(error_results, default=str)
+            
+        # Calculate execution time if started
+        if self.started_at:
+            execution_time = (datetime.now(timezone.utc) - self.started_at).total_seconds()
+            additional_fields["execution_time_seconds"] = execution_time
+            
+        self.update_status_atomic("failed", **additional_fields)
+        
+        # Set quality score to 0 for failed simulations
+        self.quality_score = 0.0
+        db.session.commit()
+
+    def cancel_simulation(self, reason=None):
+        """
+        Atomically cancel a simulation.
+        
+        Args:
+            reason: Cancellation reason (optional)
+        """
+        if self.status in ["completed", "failed", "cancelled"]:
+            raise ValueError(f"Cannot cancel simulation in status: {self.status}")
+            
+        additional_fields = {
+            "completed_at": datetime.now(timezone.utc)
+        }
+        
+        if reason:
+            cancel_info = {
+                "cancelled_reason": reason,
+                "cancelled_at": datetime.now(timezone.utc).isoformat()
+            }
+            additional_fields["results"] = json.dumps(cancel_info, default=str)
+            
+        self.update_status_atomic("cancelled", **additional_fields)
 
     def to_dict(self, include_results=True):
         """Convert to dictionary."""

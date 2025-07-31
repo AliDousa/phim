@@ -178,7 +178,7 @@ class FileUploadSecurity:
             self.allowed_mime_types = {
                 "text/csv": [".csv"],
                 "application/json": [".json"],
-                "text/plain": [".txt"],
+                "text/plain": [".txt", ".csv"],  # Allow CSV files detected as text/plain
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
                     ".xlsx"
                 ],
@@ -378,7 +378,11 @@ class AuthenticationSecurity:
                 token,
                 current_app.config["SECRET_KEY"],
                 algorithms=[current_app.config["JWT_ALGORITHM"]],
-                options={"verify_exp": True},
+                options={
+                    "verify_exp": True,
+                    "verify_iss": False,  # Disable issuer verification for now
+                    "verify_aud": False,  # Disable audience verification for now
+                },
             )
 
             # Check if token is revoked
@@ -390,10 +394,13 @@ class AuthenticationSecurity:
             return payload
 
         except jwt.ExpiredSignatureError:
+            current_app.logger.warning("JWT token has expired")
             return None
-        except jwt.InvalidTokenError:
+        except jwt.InvalidTokenError as e:
+            current_app.logger.warning(f"Invalid JWT token: {e}")
             return None
-        except Exception:
+        except Exception as e:
+            current_app.logger.error(f"JWT token verification error: {e}")
             return None
 
     def revoke_token(self, jti):

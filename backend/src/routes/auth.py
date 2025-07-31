@@ -110,17 +110,14 @@ def login():
     """Authenticate user and return token."""
     try:
         data = request.get_json()
-        print(f"DEBUG - Login attempt: {data}")  # Debug line
 
         username = data["username"].strip()
         password = data["password"]
-        print(f"DEBUG - Username: '{username}', Password length: {len(password)}")  # Debug line
 
         # Rate limiting could be added here
 
         # Authenticate user
         user = AuthManager.authenticate_user(username, password)
-        print(f"DEBUG - Auth result: {user}")  # Debug line
 
         if not user:
             # Log failed login attempt

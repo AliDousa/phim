@@ -51,22 +51,23 @@ class AuthManager:
 
             # Check for brute-force attempts before hitting the DB
             is_blocked = auth_sec.check_failed_logins(username)
-            print(f"DEBUG - User {username} blocked: {is_blocked}")
             if is_blocked:
+                current_app.logger.warning(f"Login blocked for user {username} due to failed attempts")
                 return None  # Account is temporarily locked
 
             # Try to find user by username or email
             user = User.query.filter(
                 (User.username == username) | (User.email == username)
             ).first()
-            print(f"DEBUG - User found: {user}")
 
             if user:
                 password_ok = user.check_password(password)
-                print(f"DEBUG - Password check: {password_ok}, Active: {user.is_active}")
                 if password_ok and user.is_active:
                     auth_sec.clear_failed_logins(username)
+                    current_app.logger.info(f"Successful login for user {username}")
                     return user
+                else:
+                    current_app.logger.warning(f"Failed login for user {username}: invalid credentials or inactive account")
 
             auth_sec.record_failed_login(username)
             return None

@@ -20,14 +20,22 @@ export const AuthProvider = ({ children }) => {
   // Check if user is authenticated on app load
   useEffect(() => {
     const token = localStorage.getItem('authToken');
-    if (token && token !== 'dummy-dev-token') {
+    if (token && token !== 'dummy-dev-token' && token.trim() !== '') {
       // Verify token by getting user profile
       ApiService.getProfile()
         .then((response) => {
-          setUser(response.user);
-          setIsAuthenticated(true);
+          if (response && response.user) {
+            setUser(response.user);
+            setIsAuthenticated(true);
+          } else {
+            // Invalid response, clear auth
+            localStorage.removeItem('authToken');
+            setUser(null);
+            setIsAuthenticated(false);
+          }
         })
-        .catch(() => {
+        .catch((error) => {
+          console.error('Token verification failed:', error);
           // Token is invalid, remove it
           localStorage.removeItem('authToken');
           setUser(null);
@@ -46,13 +54,21 @@ export const AuthProvider = ({ children }) => {
       setLoading(true);
       const response = await ApiService.login(credentials);
       
-      localStorage.setItem('authToken', response.token);
-      setUser(response.user);
-      setIsAuthenticated(true);
-      
-      toast.success('Login successful!');
-      return response;
+      if (response && response.token && response.user) {
+        localStorage.setItem('authToken', response.token);
+        setUser(response.user);
+        setIsAuthenticated(true);
+        toast.success('Login successful!');
+        return response;
+      } else {
+        throw new Error('Invalid login response from server');
+      }
     } catch (error) {
+      console.error('Login error:', error);
+      // Clear any invalid tokens
+      localStorage.removeItem('authToken');
+      setUser(null);
+      setIsAuthenticated(false);
       toast.error(error.message || 'Login failed');
       throw error;
     } finally {

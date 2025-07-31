@@ -69,7 +69,7 @@ def run_simulation_task(self, simulation_id):
     """
     try:
         # Import here to avoid circular imports
-        from src.models.database import Simulation, db
+        from src.models.database import Simulation, db, ConcurrencyError
         from src.models.epidemiological import (
             create_seir_model,
             create_agent_based_model,
@@ -79,16 +79,17 @@ def run_simulation_task(self, simulation_id):
         import pandas as pd
         import numpy as np
         from datetime import datetime
+        import socket
 
         # Get simulation
         simulation = Simulation.query.get(simulation_id)
         if not simulation:
             raise ValueError(f"Simulation {simulation_id} not found")
 
-        # Update status
-        simulation.status = "running"
-        simulation.started_at = datetime.utcnow()
-        db.session.commit()
+        # Atomically start simulation (prevents race conditions)
+        worker_node = socket.gethostname()
+        if not simulation.start_simulation(task_id=self.request.id, worker_node=worker_node):
+            raise ValueError(f"Simulation {simulation_id} cannot be started (status: {simulation.status})")
 
         # Get parameters
         params = simulation.get_parameters()
@@ -106,15 +107,15 @@ def run_simulation_task(self, simulation_id):
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
-        # Save results
-        simulation.set_results(results)
-        simulation.status = "completed"
-        simulation.completed_at = datetime.utcnow()
-
-        # Calculate execution time
-        simulation.calculate_execution_time()
-
-        db.session.commit()
+        # Atomically complete simulation with results
+        simulation.complete_simulation(
+            results_dict=results,
+            metrics_dict={
+                "worker_node": worker_node,
+                "task_id": self.request.id,
+                "model_type": model_type
+            }
+        )
 
         return {
             "status": "completed",
@@ -123,17 +124,25 @@ def run_simulation_task(self, simulation_id):
         }
 
     except Exception as e:
-        # Update simulation status on failure
+        # Atomically update simulation status on failure
         try:
             simulation = Simulation.query.get(simulation_id)
             if simulation:
-                simulation.status = "failed"
-                simulation.completed_at = datetime.utcnow()
-                error_results = {"error": str(e), "task_id": self.request.id}
-                simulation.set_results(error_results)
-                db.session.commit()
-        except Exception:
-            pass  # Don't fail on cleanup
+                simulation.fail_simulation(
+                    error_message=str(e),
+                    error_details={
+                        "task_id": self.request.id,
+                        "worker_node": socket.gethostname() if 'socket' in locals() else 'unknown',
+                        "exception_type": type(e).__name__
+                    }
+                )
+        except ConcurrencyError:
+            # Another process already updated the simulation status
+            pass
+        except Exception as cleanup_error:
+            # Log cleanup failure but don't fail the task
+            import logging
+            logging.error(f"Failed to update simulation {simulation_id} on error: {cleanup_error}")
 
         # Re-raise the original exception
         raise
